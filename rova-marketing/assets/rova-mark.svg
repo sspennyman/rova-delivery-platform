@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
+  <title id="title">Rova route mark</title>
+  <defs>
+    <linearGradient id="route" x1="10" y1="39" x2="38" y2="9" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#70E0B4"/>
+      <stop offset="1" stop-color="#7D9BFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="14" fill="#111A31"/>
+  <path d="M12 35c0-8.4 12-6.8 12-15.1C24 13.3 28.4 11 36 11" fill="none" stroke="url(#route)" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="12" cy="35" r="4" fill="#70E0B4" stroke="#fff" stroke-width="2"/>
+  <circle cx="36" cy="11" r="4" fill="#7D9BFF" stroke="#fff" stroke-width="2"/>
+</svg>

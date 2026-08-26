@@ -1,0 +1,16 @@
+{
+  "name": "delivery-driver-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time delivery driver tracking with customer share links and weekly trip approval logs.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "bash scripts/build.sh",
+    "validate": "node scripts/validate-site.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

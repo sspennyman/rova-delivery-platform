@@ -1,0 +1,54 @@
+# Secrets and local environment configuration
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*.json
+service-account*.json
+secrets*.json
+
+# Dependencies and package-manager caches
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Generated build and test output
+dist/
+**/dist/
+coverage/
+**/coverage/
+outputs/
+*.log
+
+# Runtime databases and local application state
+work/
+**/work/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+
+# Local archives and preserved nested repository metadata
+*.tar.gz
+.nested-git-backups/
+
+# Private sales and outreach working files
+ROVA_APOLLO_*
+ROVA_OUTREACH_*
+ROVA_SEND_BATCH_*
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

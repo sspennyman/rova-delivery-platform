@@ -1,0 +1,38 @@
+{
+  "name": "Rova Operations",
+  "short_name": "Rova",
+  "description": "AI operations platform for local delivery businesses.",
+  "start_url": "/dispatcher",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f8fb",
+  "theme_color": "#0c1222",
+  "categories": ["business", "productivity", "navigation"],
+  "icons": [
+    {
+      "src": "/assets/rova-logo.png",
+      "sizes": "1536x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
