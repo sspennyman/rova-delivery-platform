@@ -1,7 +1,7 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const AUTH_STORAGE_KEY = "deliveryAuthSession";
-const DISPATCHER_VIEWS = new Set(["operations", "drivers", "channels", "accounts", "reports", "settings"]);
+const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings"]);
 
 function readStoredAuth() {
   try {
@@ -42,6 +42,8 @@ const state = {
   orderFilter: "all",
   bulkDriverId: "",
   bulkRate: null,
+  optimizerPlan: null,
+  optimizerLoading: false,
   lastSnapshotSerialized: "",
   lastWebhook: null,
   dispatcherView: "operations",
@@ -714,6 +716,7 @@ function dispatcherViewLinks(options = {}) {
     : [
         { id: "operations", label: "Today" },
         { id: "drivers", label: "Team" },
+        { id: "analytics", label: "Analytics" },
         { id: "reports", label: "Reports" }
       ];
   return items.map((item) => `
@@ -1366,6 +1369,24 @@ function startTripFormHtml(prefix, driverId = "") {
   `;
 }
 
+function queuedDeliveryFormHtml() {
+  const start = new Date(Date.now() + 30 * 60 * 1000);
+  const defaultMinutes = Number(state.snapshot?.company?.operations?.defaultWindowMinutes || 120);
+  const end = new Date(start.getTime() + defaultMinutes * 60 * 1000);
+  return `
+    <form id="create-delivery-form" class="form-grid">
+      <div class="field"><label for="delivery-customer">Customer name</label><input class="input" id="delivery-customer" name="customerName" autocomplete="name" required></div>
+      <div class="field"><label for="delivery-phone">Customer phone</label><input class="input" id="delivery-phone" name="customerPhone" type="tel" autocomplete="tel"></div>
+      <div class="field full"><label for="delivery-pickup">Pickup</label><input class="input" id="delivery-pickup" name="pickup" value="${h(companyPickupAddress())}" required></div>
+      <div class="field full"><label for="delivery-destination">Delivery address</label><input class="input" id="delivery-destination" name="destination" autocomplete="street-address" required></div>
+      <div class="field"><label for="delivery-window-start">Window starts</label><input class="input" id="delivery-window-start" name="deliveryWindowStart" type="datetime-local" value="${h(localDateTimeInputValue(start))}"></div>
+      <div class="field"><label for="delivery-window-end">Deliver by</label><input class="input" id="delivery-window-end" name="deliveryWindowEnd" type="datetime-local" value="${h(localDateTimeInputValue(end))}"></div>
+      <div class="field"><label for="delivery-priority">Priority</label><select class="select" id="delivery-priority" name="priority"><option value="standard">Standard</option><option value="priority">Priority</option><option value="urgent">Urgent</option></select></div>
+      <div class="field full"><label for="delivery-notes">Delivery notes</label><textarea class="textarea" id="delivery-notes" name="notes" placeholder="Access details, products, customer instructions"></textarea></div>
+      <div class="field full"><button class="button" type="submit">Add to dispatch queue</button><p class="field-help">Add several deliveries, select them together, then preview or optimize the route.</p></div>
+    </form>`;
+}
+
 function driverInviteText(driver) {
   if (driver.inviteStatus === "accepted") {
     return { label: "Account active", className: "available" };
@@ -1619,7 +1640,7 @@ function driverEditModalHtml() {
     <div class="modal-backdrop" role="presentation" data-modal-backdrop>
       <section class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="driver-editor-title" data-modal-panel>
         <div class="modal-header">
-          <div><p class="eyebrow">Driver profile</p><h2 id="driver-editor-title">${h(driver.name)}</h2><p>Edit login email, paid home routes, vehicle, shift, and rate.</p></div>
+          <div><p class="eyebrow">Driver profile</p><h2 id="driver-editor-title">${h(driver.name)}</h2><p>Edit login email, paid home routes, vehicle, shift, capacity, and rate.</p></div>
           <button class="icon-button" data-action="close-driver-editor" type="button" aria-label="Close driver editor">×</button>
         </div>
         <form id="edit-driver-form" class="form-grid modal-form">
@@ -1630,6 +1651,7 @@ function driverEditModalHtml() {
           <div class="field"><label for="edit-driver-vehicle">Vehicle</label><input class="input" id="edit-driver-vehicle" name="vehicle" value="${h(driver.vehicle || "")}" required></div>
           <div class="field"><label for="edit-driver-shift">Shift</label><input class="input" id="edit-driver-shift" name="shift" value="${h(driver.shift || "")}"></div>
           <div class="field"><label for="edit-driver-rate">Rate per km</label><input class="input" id="edit-driver-rate" name="defaultRate" type="number" min="0" step="0.01" value="${h(driver.defaultRate || 0)}" required></div>
+          <div class="field"><label for="edit-driver-capacity">Route capacity</label><input class="input" id="edit-driver-capacity" name="capacity" type="number" min="1" max="100" step="1" value="${h(driver.capacity || 20)}" required><small>Maximum active stops used by Smart Dispatch.</small></div>
           <div class="field full"><label for="edit-driver-home">Paid home address</label><input class="input" id="edit-driver-home" name="homeAddress" autocomplete="street-address" value="${h(driver.homeAddress || "")}" required><small>Used for Home → Work and Depot → Home paid trips.</small></div>
           <fieldset class="color-field field full"><legend>Map colour</legend><div class="color-swatches" role="radiogroup" aria-label="Driver map colour">${colorSwatchesHtml(driver.color)}</div></fieldset>
           <div class="modal-actions"><button class="button danger" data-action="delete-driver" data-driver-id="${h(driver.id)}" data-driver-name="${h(driver.name)}" type="button">Archive driver</button><span></span><button class="button secondary" data-action="close-driver-editor" type="button">Cancel</button><button class="button" type="submit">Save driver</button></div>
@@ -2030,7 +2052,7 @@ function onboardingSteps() {
   return [
     { label: "Configure workspace", detail: "Company, depot, currency, and time zone", done: Boolean(company.name && company.pickupAddress && company.timeZone) },
     { label: "Add a driver", detail: "Invite at least one driver to create an account", done: getDrivers().length > 0 },
-    { label: "Connect orders", detail: "Connect Shopify, WooCommerce, Wix, or a supported webhook", done: Boolean(state.snapshot?.integrations?.connections?.length) },
+    { label: "Add or connect orders", detail: "Enter deliveries manually or connect Shopify, WooCommerce, Wix, or a webhook", done: Boolean(state.snapshot?.integrations?.connections?.length || trips.length) },
     { label: "Create a delivery", detail: "Import or enter the first customer delivery", done: trips.length > 0 },
     { label: "Complete a live run", detail: "Dispatch, track, and close one delivery", done: trips.some((trip) => ["delivered", "completed", "submitted", "approved"].includes(trip.status)) }
   ];
@@ -2071,6 +2093,11 @@ function onboardingHtml(options = {}) {
 
 function renderSettingsHtml() {
   const company = state.snapshot?.company || {};
+  const branding = company.branding || {};
+  const operations = company.operations || {};
+  const notifications = company.notifications || {};
+  const plans = state.snapshot?.plans || [];
+  const planAccess = state.snapshot?.planAccess || plans[0] || {};
   const status = company.subscriptionStatus === "active" ? "Active" : company.subscriptionStatus === "past_due" ? "Past due" : "Setup";
   const timeZones = ["America/Toronto", "America/Vancouver", "America/Edmonton", "America/Winnipeg", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"];
   return `
@@ -2085,6 +2112,24 @@ function renderSettingsHtml() {
               <div class="field"><label for="company-timezone">Time zone</label><select class="select" id="company-timezone" name="timeZone">${timeZones.map((zone) => `<option value="${h(zone)}"${zone === company.timeZone ? " selected" : ""}>${h(zone.replace("America/", "").replaceAll("_", " "))}</option>`).join("")}</select></div>
               <div class="field"><label for="company-currency">Currency</label><select class="select" id="company-currency" name="currency"><option value="CAD"${company.currency === "CAD" ? " selected" : ""}>CAD</option><option value="USD"${company.currency === "USD" ? " selected" : ""}>USD</option></select></div>
               <div class="field full"><label for="company-support">Customer support email</label><input class="input" id="company-support" name="supportEmail" type="email" value="${h(company.supportEmail || "hello@floraljet.llc")}" required></div>
+              <fieldset class="settings-section full"><legend>Customer tracking brand</legend><div class="form-grid compact">
+                <div class="field"><label for="brand-colour">Primary colour</label><input class="input color-input" id="brand-colour" name="brandPrimaryColor" type="color" value="${h(branding.primaryColor || "#176b52")}"></div>
+                <div class="field"><label for="brand-logo">Logo URL</label><input class="input" id="brand-logo" name="logoUrl" type="url" placeholder="https://…" value="${h(branding.logoUrl || "")}"></div>
+                <div class="field full"><label for="tracking-headline">Tracking-page headline</label><input class="input" id="tracking-headline" name="trackingHeadline" maxlength="90" value="${h(branding.trackingHeadline || "Your delivery is on the way")}"></div>
+                <label class="setting-toggle full"><input type="checkbox" name="showDriverFirstName" ${branding.showDriverFirstName === false ? "" : "checked"}><span><strong>Show driver first name</strong><small>Never exposes the driver’s private profile or home address.</small></span></label>
+              </div></fieldset>
+              <fieldset class="settings-section full"><legend>Delivery rules</legend><div class="form-grid compact">
+                <div class="field"><label for="business-hours">Business hours</label><input class="input" id="business-hours" name="businessHours" value="${h(operations.businessHours || "")}"></div>
+                <div class="field"><label for="default-window">Default delivery window</label><select class="select" id="default-window" name="defaultWindowMinutes">${[60, 90, 120, 180, 240].map((minutes) => `<option value="${minutes}"${Number(operations.defaultWindowMinutes || 120) === minutes ? " selected" : ""}>${minutes < 120 ? `${minutes} minutes` : `${minutes / 60} hours`}</option>`).join("")}</select></div>
+                <div class="field full"><label for="delivery-zones">Delivery zones</label><textarea class="textarea" id="delivery-zones" name="deliveryZones" placeholder="Downtown: M5V, M5H&#10;West: Etobicoke, Mississauga">${h(operations.deliveryZones || "")}</textarea></div>
+                <label class="setting-toggle"><input type="checkbox" name="requirePhoto" ${operations.requirePhoto ? "checked" : ""}><span><strong>Require delivery photo</strong><small>Drivers cannot complete a successful stop without one.</small></span></label>
+                <label class="setting-toggle"><input type="checkbox" name="requireSignature" ${operations.requireSignature ? "checked" : ""}><span><strong>Require signature</strong><small>Useful for regulated or high-value deliveries.</small></span></label>
+              </div></fieldset>
+              <fieldset class="settings-section full"><legend>Customer notifications</legend><div class="settings-toggle-grid">
+                <label class="setting-toggle"><input type="checkbox" name="customerTracking" ${notifications.customerTracking === false ? "" : "checked"}><span><strong>Tracking links</strong><small>Create branded customer tracking links.</small></span></label>
+                <label class="setting-toggle"><input type="checkbox" name="etaUpdates" ${notifications.etaUpdates === false ? "" : "checked"}><span><strong>ETA updates</strong><small>Prepare arrival notifications as routes progress.</small></span></label>
+                <label class="setting-toggle"><input type="checkbox" name="deliveredConfirmation" ${notifications.deliveredConfirmation === false ? "" : "checked"}><span><strong>Delivered confirmation</strong><small>Show completion and proof when available.</small></span></label>
+              </div></fieldset>
               <div class="field full"><button class="button" type="submit">Save workspace settings</button></div>
             </form>
           </div>
@@ -2092,9 +2137,10 @@ function renderSettingsHtml() {
 
         <div class="settings-stack">
           <div class="panel">
-            <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(company.plan || "Pilot")}</h3><p class="panel-subtitle">Dedicated Rova workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
-            <div class="panel-body"><p class="settings-copy">Your workspace includes dispatch, driver access, routing, customer tracking, proof workflow, mileage, and reporting. Billing and onboarding scope are confirmed for each account.</p><div class="item-actions"><a class="button" href="${h(SQUARE_PAYMENT_URL)}" target="_blank" rel="noreferrer">Pay setup or invoice</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rova%20billing">Billing support</a></div></div>
+            <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(planAccess.name || company.plan || "Starter")}</h3><p class="panel-subtitle">${planAccess.monthlyPrice ? `$${h(planAccess.monthlyPrice)}/month · ` : ""}Dedicated Rova workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
+            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">Plan changes are reviewed before billing. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rova%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rova%20billing">Billing support</a></div></div>
           </div>
+          <div class="panel network-readiness-card"><div class="panel-header"><div><p class="eyebrow">Future network</p><h3 class="panel-title">My Drivers + Rova Driver</h3><p class="panel-subtitle">The fulfillment model is ready for external network drivers without pretending a marketplace exists today.</p></div><span class="status assigned">Coming later</span></div><div class="panel-body"><div class="fulfillment-choice-preview"><div class="active"><strong>My Drivers</strong><span>Your employed or contracted fleet.</span></div><div><strong>Rova Driver</strong><span>Quote, accept, track, and platform-fee workflow prepared for a future network.</span></div></div><p class="settings-copy">Until the Rova network launches, use saved courier partners for third-party coverage.</p><button class="button secondary" data-action="dispatcher-view" data-view="drivers" type="button">Manage courier partners</button></div></div>
           <div class="panel">
             <div class="panel-header"><div><h3 class="panel-title">Support</h3><p class="panel-subtitle">Get help with onboarding, integrations, or live operations.</p></div></div>
             <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "hello@floraljet.llc")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "hello@floraljet.llc")}?subject=Rova%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button></div></div>
@@ -2102,6 +2148,92 @@ function renderSettingsHtml() {
         </div>
       </div>
       ${onboardingHtml()}
+    </section>`;
+}
+
+function analyticsMetricCard(label, value, detail, tone = "") {
+  return `<article class="analytics-metric ${h(tone)}"><span>${h(label)}</span><strong>${h(value)}</strong><small>${h(detail)}</small></article>`;
+}
+
+function renderAnalyticsHtml() {
+  const analytics = state.snapshot?.analytics || {};
+  const drivers = analytics.deliveriesByDriver || [];
+  const maxCompleted = Math.max(1, ...drivers.map((driver) => Number(driver.completed || 0)));
+  const onTimeValue = analytics.onTimeRate === null || analytics.onTimeRate === undefined ? "—" : `${analytics.onTimeRate}%`;
+  const durationValue = analytics.averageDeliveryMinutes === null || analytics.averageDeliveryMinutes === undefined ? "—" : `${analytics.averageDeliveryMinutes} min`;
+  const distanceValue = analytics.averageDistanceKm === null || analytics.averageDistanceKm === undefined ? "—" : `${analytics.averageDistanceKm} km`;
+  const utilizationValue = analytics.driverUtilizationRate === null || analytics.driverUtilizationRate === undefined ? "—" : `${analytics.driverUtilizationRate}%`;
+  const costValue = analytics.averageCostPerDelivery === null || analytics.averageCostPerDelivery === undefined ? "—" : formatMoney(analytics.averageCostPerDelivery);
+  return `
+    <section class="dispatch-view${state.dispatcherView === "analytics" ? " active" : ""} dashboard-section view-section analytics-view" id="analytics">
+      <div class="analytics-source-note"><span class="pulse"></span><div><strong>Live operations data</strong><small>All completed Rova delivery records in this workspace. Metrics refresh with the dispatch board.</small></div></div>
+      <div class="analytics-metric-grid">
+        ${analyticsMetricCard("Completed deliveries", analytics.completed || 0, "Completed, delivered, submitted, or approved")}
+        ${analyticsMetricCard("On-time delivery", onTimeValue, "Only deliveries with a configured delivery window", Number(analytics.onTimeRate || 100) < 90 ? "warn" : "good")}
+        ${analyticsMetricCard("Average delivery time", durationValue, "Start to completion for timed deliveries")}
+        ${analyticsMetricCard("Average distance", distanceValue, "Recorded driver distance per completed delivery")}
+        ${analyticsMetricCard("Failed deliveries", analytics.failed || 0, "Recorded unsuccessful delivery outcomes", analytics.failed ? "warn" : "good")}
+        ${analyticsMetricCard("Late deliveries", analytics.late || 0, "Past their configured delivery-window end", analytics.late ? "warn" : "good")}
+        ${analyticsMetricCard("Driver utilization", utilizationValue, "Drivers with active or completed work ÷ active roster")}
+        ${analyticsMetricCard("Cost per delivery", costValue, "Recorded distance × kilometre rate; excludes unknown costs")}
+      </div>
+      <div class="analytics-grid">
+        <div class="panel analytics-chart-panel">
+          <div class="panel-header"><div><p class="eyebrow">Workload</p><h2 class="panel-title">Deliveries per driver</h2><p class="panel-subtitle">Completed delivery volume with current active stops alongside it.</p></div></div>
+          <div class="panel-body">
+            <div class="driver-bars">
+              ${drivers.length ? drivers.map((driver) => `<div class="driver-bar-row"><div><strong>${h(driver.name)}</strong><span>${driver.completed} completed · ${driver.active} active</span></div><div class="driver-bar-track"><span style="width:${Math.round((Number(driver.completed || 0) / maxCompleted) * 100)}%"></span></div><b>${driver.completed}</b></div>`).join("") : `<div class="empty compact-empty">Completed delivery data will appear after the first route is closed.</div>`}
+            </div>
+          </div>
+        </div>
+        <div class="panel analytics-definition-panel">
+          <div class="panel-header"><div><p class="eyebrow">Metric quality</p><h2 class="panel-title">What Rova can measure</h2><p class="panel-subtitle">Unknown data stays unknown instead of being estimated.</p></div></div>
+          <div class="panel-body"><div class="accounts-checklist">
+            <div><strong>On-time rate</strong><span>Requires a delivery-window end and a completion timestamp.</span></div>
+            <div><strong>Cost per delivery</strong><span>Uses recorded distance and the assigned kilometre rate. Fuel, wages, and courier fees are excluded unless captured.</span></div>
+            <div><strong>Utilization</strong><span>Shows the share of active roster drivers who have active or completed delivery work in the available history.</span></div>
+            <div><strong>Freshness</strong><span>Live from the same workspace state used by dispatch; no separate analytics export is required.</span></div>
+          </div></div>
+        </div>
+      </div>
+    </section>`;
+}
+
+function dispatchAssistantPanelHtml() {
+  const queued = queuedTrips();
+  const alerts = state.snapshot?.alerts || [];
+  const plan = state.optimizerPlan;
+  const engineLabel = plan?.engine === "google-routes-plus-rules" ? "Google Routes + explainable rules" : "Explainable dispatch rules";
+  return `
+    <section class="dispatch-assistant" aria-label="Dispatch recommendations">
+      <div class="dispatch-assistant-head">
+        <div>
+          <p class="eyebrow">Smart dispatch</p>
+          <h2>${alerts.length ? `${alerts.length} issue${alerts.length === 1 ? "" : "s"} need attention` : queued.length ? `${queued.length} deliver${queued.length === 1 ? "y is" : "ies are"} ready to plan` : "Routes are under control"}</h2>
+          <p>Rova considers priority, delivery windows, driver availability, current workload, and vehicle capacity—and explains every recommendation.</p>
+        </div>
+        <button class="button assistant-button" data-action="optimize-deliveries" type="button" ${!queued.length || state.optimizerLoading ? "disabled" : ""}>${state.optimizerLoading ? "Planning…" : "Optimize deliveries"}</button>
+      </div>
+      ${alerts.length ? `<div class="dispatch-alerts">${alerts.map((alert) => `<div class="dispatch-alert ${h(alert.severity)}"><span>${h(alert.message)}</span><button class="button ghost compact-action" data-action="focus-alert" data-alert-type="${h(alert.type)}" type="button">Review</button></div>`).join("")}</div>` : ""}
+      ${plan ? `
+        <div class="optimization-plan">
+          <div class="optimization-summary">
+            <div><strong>${plan.totalDeliveries}</strong><span>deliveries</span></div>
+            <div><strong>${plan.recommendations.length}</strong><span>driver routes</span></div>
+            <div><strong>${h(engineLabel)}</strong><span>planning engine</span></div>
+          </div>
+          <p class="optimization-explanation">${h(plan.explanation)}</p>
+          <div class="optimization-routes">
+            ${plan.recommendations.map((recommendation) => `
+              <article class="optimization-route">
+                <div class="optimization-route-head"><div><strong>${h(recommendation.driverName)}</strong><span>${recommendation.currentStops} current · ${recommendation.stops.length} new · capacity ${recommendation.capacity}</span></div><span class="status ${recommendation.optimized ? "available" : "assigned"}">${recommendation.optimized ? "Route optimized" : "Balanced plan"}</span></div>
+                <p>${h(recommendation.reason)}</p>
+                <div class="optimization-route-metrics"><span>${recommendation.estimatedDurationMinutes === null ? "Time estimate requires Google Routes" : `${h(recommendation.estimatedDurationMinutes)} min`}</span><span>${recommendation.estimatedDistanceKm === null ? "Mileage estimate pending" : `${h(recommendation.estimatedDistanceKm)} km`}</span>${recommendation.expectedCompletionAt ? `<span>Finish about ${h(new Date(recommendation.expectedCompletionAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }))}</span>` : ""}</div>
+                <ol>${recommendation.stops.map((stop) => `<li><span>${h(stop.customerName)}</span><small>${h(stop.priority)} · ${h(stop.destination)}</small></li>`).join("")}</ol>
+              </article>`).join("")}
+          </div>
+          <div class="optimization-actions"><button class="button" data-action="apply-optimization" type="button">Apply this plan</button><button class="button ghost" data-action="clear-optimization" type="button">Dismiss</button></div>
+        </div>` : ""}
     </section>`;
 }
 
@@ -2200,9 +2332,11 @@ function renderDispatcher() {
   const view = state.dispatcherView;
   const companyName = state.snapshot?.company?.name || "Delivery operations";
   const workspaceEyebrow = companyName.toLowerCase() === "rova" ? "Rova workspace" : `Rova · ${companyName}`;
-  const viewTitle = view === "drivers" ? "Delivery team" : view === "channels" ? "Connections" : view === "accounts" ? "Accounts" : view === "reports" ? "Reports" : view === "settings" ? "Settings" : "Today";
+  const viewTitle = view === "drivers" ? "Delivery team" : view === "analytics" ? "Operations analytics" : view === "channels" ? "Connections" : view === "accounts" ? "Accounts" : view === "reports" ? "Reports" : view === "settings" ? "Settings" : "Today";
   const viewSubtitle = view === "drivers"
     ? "Manage in-house drivers and the courier partners you use for outside coverage."
+    : view === "analytics"
+      ? "See service quality, route efficiency, driver workload, and delivery cost in one owner-ready view."
     : view === "channels"
       ? "Connect Shopify, WooCommerce, Wix, or a supported order webhook to one dispatch queue."
       : view === "accounts"
@@ -2233,6 +2367,7 @@ function renderDispatcher() {
 
     <div class="${viewClass("operations")}">
     ${todayAtGlanceHtml(trips)}
+    ${dispatchAssistantPanelHtml()}
     ${exceptionPanelHtml(trips)}
     <section class="dashboard-section operations-orders" id="orders" aria-label="Orders and route map">
       <div class="dispatch-workspace">
@@ -2260,7 +2395,7 @@ function renderDispatcher() {
               <span><span class="panel-title">Create delivery</span><span class="panel-subtitle">Add a manual delivery only when it is not coming from a connected site.</span></span>
               <span class="summary-control" aria-hidden="true">+</span>
             </summary>
-            <div class="panel-body">${startTripFormHtml("dispatcher")}</div>
+            <div class="panel-body">${queuedDeliveryFormHtml()}</div>
           </details>
         </div>
       </div>
@@ -2324,6 +2459,11 @@ function renderDispatcher() {
                 <label for="driver-rate">Default rate</label>
                 <input class="input" id="driver-rate" name="defaultRate" type="number" min="0" step="0.01" value="1.25" required>
               </div>
+              <div class="field">
+                <label for="driver-capacity">Route capacity</label>
+                <input class="input" id="driver-capacity" name="capacity" type="number" min="1" max="100" step="1" value="20" required>
+                <small>Maximum active stops used by Smart Dispatch.</small>
+              </div>
               <fieldset class="color-field field full">
                 <legend>Map colour</legend>
                 <div class="color-swatches" role="radiogroup" aria-label="Driver map colour">
@@ -2349,6 +2489,8 @@ function renderDispatcher() {
         ${courierPartnersWorkspaceHtml()}
       </div>
     </section>
+
+    ${renderAnalyticsHtml()}
 
     ${channelsManagementHtml()}
 
@@ -2507,6 +2649,15 @@ function renderDriver() {
                   <div class="driver-current-trip" data-proof-draft>
                     ${renderMapBlock("driver-map", [combinedRouteTrip], { small: true, label: isPublishing ? "Location sharing on" : "Trip route" })}
                     <div class="driver-route-summary">${routeStopLinesHtml(combinedRouteTrip)}</div>
+                    <div class="next-stop-card">
+                      <div><p class="eyebrow">Next delivery</p><h3>${h(currentTrip.customerName)}</h3><p>${h(currentTrip.destination)}</p></div>
+                      <div class="next-stop-meta"><span>${currentTrip.etaMinutes ? `${h(currentTrip.etaMinutes)} min ETA` : "ETA updates after routing"}</span><span>${currentTrip.distanceKm ? formatKm(currentTrip.distanceKm) : "Distance calculating"}</span></div>
+                      <div class="next-stop-actions">
+                        <a class="button" href="${h(googleMapsDirectionsUrl(currentTrip, { navigate: true, currentLocation: true }))}" target="_blank" rel="noreferrer">Navigate</a>
+                        ${currentTrip.customerPhone ? `<a class="button secondary" href="tel:${h(currentTrip.customerPhone)}">Call customer</a><a class="button secondary" href="sms:${h(currentTrip.customerPhone)}">Message</a>` : ""}
+                      </div>
+                      ${currentTrip.notes ? `<div class="next-stop-note"><strong>Delivery notes</strong><span>${h(currentTrip.notes)}</span></div>` : ""}
+                    </div>
                     <div class="privacy-note ${isPublishing ? "sharing" : ""}">
                       <span class="privacy-dot"></span>
                       <span>${h(trackingMessage)}</span>
@@ -2683,12 +2834,15 @@ function customerMetricHtml(label, value, detail = "") {
 function renderCustomer() {
   const trip = state.customerTrip;
   const companyName = state.company?.name || "Delivery Tracker";
+  const branding = state.company?.branding || {};
+  const brandLogo = branding.logoUrl || "/assets/rova-logo.png";
+  const brandColor = /^#[0-9a-f]{6}$/i.test(branding.primaryColor || "") ? branding.primaryColor : "#176b52";
   if (!state.route.token) {
     app.innerHTML = `
-      <div class="customer-shell">
+      <div class="customer-shell" style="--customer-brand:${h(brandColor)}">
         <header class="customer-header">
           <div class="brand">
-            <div class="brand-mark"><img src="/assets/rova-logo.png" alt=""></div>
+            <div class="brand-mark"><img src="${h(brandLogo)}" alt=""></div>
             <div>
               <div class="brand-name" style="color:var(--ink)">${h(companyName)}</div>
               <div class="brand-subtitle" style="color:var(--muted)">Customer tracking</div>
@@ -2705,10 +2859,10 @@ function renderCustomer() {
 
   if (!trip) {
     app.innerHTML = `
-      <div class="customer-shell">
+      <div class="customer-shell" style="--customer-brand:${h(brandColor)}">
         <header class="customer-header">
           <div class="brand">
-            <div class="brand-mark"><img src="/assets/rova-logo.png" alt=""></div>
+            <div class="brand-mark"><img src="${h(brandLogo)}" alt=""></div>
             <div>
               <div class="brand-name" style="color:var(--ink)">${h(companyName)}</div>
               <div class="brand-subtitle" style="color:var(--muted)">Customer tracking</div>
@@ -2727,6 +2881,8 @@ function renderCustomer() {
   const lastUpdated = trip.location?.timestamp || trip.courier?.updatedAt || trip.endedAt || trip.startedAt;
   const isLive = trip.status === "active" && !isCourier;
   const isInTransit = isLive || trip.courier?.status === "picked-up";
+  const delivered = trip.status === "delivered" || ["completed", "submitted", "approved", "rejected"].includes(trip.status);
+  const liveEta = trip.etaMinutes && isInTransit ? Math.max(1, Math.round(Number(trip.etaMinutes))) : null;
   const locationText = trip.location
     ? "Live location shared"
     : isCourier
@@ -2734,10 +2890,10 @@ function renderCustomer() {
       : isLive ? "Waiting for driver GPS" : "Tracking complete";
 
   app.innerHTML = `
-    <div class="customer-shell">
+    <div class="customer-shell" style="--customer-brand:${h(brandColor)}">
       <header class="customer-header">
         <div class="brand">
-          <div class="brand-mark"><img src="/assets/rova-logo.png" alt=""></div>
+          <div class="brand-mark"><img src="${h(brandLogo)}" alt=""></div>
           <div>
             <div class="brand-name" style="color:var(--ink)">${h(companyName)}</div>
             <div class="brand-subtitle" style="color:var(--muted)">Customer tracking</div>
@@ -2751,7 +2907,8 @@ function renderCustomer() {
       <main class="customer-main">
         <div class="topbar">
           <div>
-            <h1 class="page-title">${isInTransit ? "Your delivery is on the way" : "Delivery status"}</h1>
+            <p class="eyebrow">${delivered ? "Delivered" : liveEta ? `${liveEta} minutes away` : "Live delivery status"}</p>
+            <h1 class="page-title">${delivered ? "Your delivery has arrived" : isInTransit ? h(branding.trackingHeadline || "Your delivery is on the way") : "Delivery status"}</h1>
             <p class="page-subtitle">${h(trip.customerName)} · ${h(routeSummary(trip, { customer: true }))}</p>
           </div>
           ${statusPill(trip.status)}
@@ -3842,10 +3999,26 @@ async function completeSelectedActiveTrips() {
   render();
 }
 
+async function prepareOptimizationPlan() {
+  const tripIds = queuedTrips().map((trip) => trip.id);
+  if (!tripIds.length) throw new Error("There are no queued deliveries to optimize.");
+  state.optimizerLoading = true;
+  render();
+  try {
+    const response = await api("/api/routes/recommendations", { method: "POST", body: { tripIds } });
+    state.optimizerPlan = response.plan;
+    toast("Optimization plan ready");
+  } finally {
+    state.optimizerLoading = false;
+    render();
+  }
+}
+
 async function autoAssignOrders() {
   const tripIds = queuedTrips().map((trip) => trip.id);
   const response = await api("/api/routes/auto-assign", { method: "POST", body: { tripIds } });
   if (response.snapshot) state.snapshot = response.snapshot;
+  state.optimizerPlan = null;
   toast(`${response.assigned} order${response.assigned === 1 ? "" : "s"} assigned${response.optimizedRoutes ? ` across ${response.optimizedRoutes} optimized route${response.optimizedRoutes === 1 ? "" : "s"}` : ""}`);
   render();
 }
@@ -3970,6 +4143,7 @@ async function updateDriverProfile(form) {
   const body = formObject(form);
   const driverId = String(body.driverId || "");
   body.defaultRate = Number(body.defaultRate || 0);
+  body.capacity = Number(body.capacity || 20);
   delete body.driverId;
   const response = await api(`/api/drivers/${encodeURIComponent(driverId)}`, { method: "PATCH", body });
   if (response.snapshot) state.snapshot = response.snapshot;
@@ -4412,6 +4586,29 @@ app.addEventListener("click", async (event) => {
       syncSelectionControls("active");
       return;
     }
+    if (action === "optimize-deliveries") {
+      await prepareOptimizationPlan();
+      return;
+    }
+    if (action === "apply-optimization") {
+      await autoAssignOrders();
+      return;
+    }
+    if (action === "clear-optimization") {
+      state.optimizerPlan = null;
+      render();
+      return;
+    }
+    if (action === "focus-alert") {
+      if (target.dataset.alertType === "unassigned") {
+        state.orderFilter = "queued";
+        applyOrderFilters();
+        document.querySelector("[data-order-card]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else {
+        document.querySelector(".active-deliveries-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
     if (action === "auto-assign-orders") {
       await autoAssignOrders();
       return;
@@ -4582,6 +4779,16 @@ app.addEventListener("submit", async (event) => {
       return;
     }
 
+    if (form.id === "create-delivery-form") {
+      const body = formObject(form);
+      const response = await api("/api/deliveries", { method: "POST", body });
+      if (response.snapshot) state.snapshot = response.snapshot;
+      state.optimizerPlan = null;
+      toast("Delivery added to the queue");
+      render();
+      return;
+    }
+
     if (form.id === "dispatcher-start-trip" || form.id === "driver-start-trip") {
       const body = formObject(form);
       body.kmRate = Number(body.kmRate);
@@ -4601,6 +4808,7 @@ app.addEventListener("submit", async (event) => {
     if (form.id === "add-driver-form") {
       const body = formObject(form);
       body.defaultRate = Number(body.defaultRate);
+      body.capacity = Number(body.capacity || 20);
       const response = await api("/api/drivers", {
         method: "POST",
         body
@@ -4776,7 +4984,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=32").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=39").catch(() => {});
   });
 }
 

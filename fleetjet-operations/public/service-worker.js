@@ -1,9 +1,9 @@
-const CACHE_NAME = "rova-operations-v38";
+const CACHE_NAME = "rova-operations-v39";
 const APP_SHELL = [
   "/",
   "/index.html",
-  "/styles.css?v=38",
-  "/app.js?v=38",
+  "/styles.css?v=39",
+  "/app.js?v=39",
   "/assets/rova-mark.svg",
   "/manifest.webmanifest",
   "/assets/rova-logo.png",

@@ -18,6 +18,36 @@ const LEAD_ORIGINS = new Set(["https://floraljet.llc", "https://www.floraljet.ll
 const APP_CANONICAL_HOST = "app.floraljet.llc";
 const APP_HOSTING_ALIASES = new Set(["delivery-driver-tracker.spennyman.chatgpt.site"]);
 const PROOF_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
+const NORMALIZED_PROJECTION_VERSION = 1;
+const PLAN_CATALOG = Object.freeze({
+  starter: {
+    id: "starter",
+    name: "Starter",
+    monthlyPrice: 99,
+    currency: "CAD",
+    deliveryLimit: 500,
+    driverLimit: 5,
+    features: ["dispatch", "driver-app", "customer-tracking", "proof", "route-optimization", "basic-analytics"]
+  },
+  growth: {
+    id: "growth",
+    name: "Growth",
+    monthlyPrice: 199,
+    currency: "CAD",
+    deliveryLimit: 2000,
+    driverLimit: 15,
+    features: ["dispatch", "driver-app", "customer-tracking", "proof", "basic-analytics", "advanced-optimization", "automations", "integrations"]
+  },
+  pro: {
+    id: "pro",
+    name: "Pro",
+    monthlyPrice: 399,
+    currency: "CAD",
+    deliveryLimit: 10000,
+    driverLimit: 50,
+    features: ["dispatch", "driver-app", "customer-tracking", "proof", "basic-analytics", "advanced-optimization", "automations", "integrations", "advanced-analytics", "white-label-tracking"]
+  }
+});
 const PROOF_MEDIA_TYPES = new Map([
   ["image/jpeg", "jpg"],
   ["image/png", "png"],
@@ -54,6 +84,12 @@ const MIME_TYPES = {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function optionalIso(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 function normalizeTripType(value) {
@@ -446,8 +482,28 @@ function seededDb() {
       pickupAddress: DEFAULT_PICKUP_ADDRESS,
       timeZone: "America/Toronto",
       supportEmail: "hello@floraljet.llc",
-      plan: "Pilot",
-      subscriptionStatus: "setup"
+      plan: "Starter",
+      planId: "starter",
+      subscriptionStatus: "setup",
+      branding: {
+        primaryColor: "#176b52",
+        logoUrl: "",
+        trackingHeadline: "Your delivery is on the way",
+        showDriverFirstName: true
+      },
+      operations: {
+        businessHours: "Mon-Fri 9:00 AM-6:00 PM",
+        deliveryZones: "",
+        defaultWindowMinutes: 120,
+        requirePhoto: false,
+        requireSignature: false
+      },
+      notifications: {
+        customerTracking: true,
+        etaUpdates: true,
+        deliveredConfirmation: true
+      },
+      network: { status: "coming-soon", enabled: false }
     },
     wix: { lastSyncAt: null, lastError: "", importedOrderIds: [] },
     integrations: { connections: [] },
@@ -477,6 +533,194 @@ async function ensurePersistentDatabase(env = {}) {
   return true;
 }
 
+async function ensureNormalizedProjection(env = {}) {
+  if (!hasPersistentDatabase(env) || typeof env.DB.batch !== "function") return false;
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS rova_businesses (id TEXT PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL, pickup_address TEXT NOT NULL, time_zone TEXT NOT NULL, settings_json TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_users (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, role TEXT NOT NULL, name TEXT NOT NULL, email TEXT, status TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_drivers (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, driver_type TEXT NOT NULL, name TEXT NOT NULL, email TEXT, phone TEXT, vehicle TEXT, status TEXT NOT NULL, capacity INTEGER NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_customers (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, display_name TEXT NOT NULL, address TEXT, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_routes (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, driver_id TEXT, origin TEXT, status TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_deliveries (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, customer_id TEXT, driver_id TEXT, route_id TEXT, status TEXT NOT NULL, priority TEXT NOT NULL, fulfillment_type TEXT NOT NULL, pickup TEXT, destination TEXT, window_start TEXT, window_end TEXT, distance_km REAL NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_delivery_stops (id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, stop_order INTEGER NOT NULL, label TEXT, address TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_driver_locations (driver_id TEXT PRIMARY KEY, delivery_id TEXT, lat REAL, lng REAL, accuracy REAL, recorded_at TEXT, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_proof_of_delivery (delivery_id TEXT PRIMARY KEY, outcome TEXT, method TEXT, recipient TEXT, proof_json TEXT NOT NULL, recorded_at TEXT, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, monthly_price REAL NOT NULL, currency TEXT NOT NULL, limits_json TEXT NOT NULL, features_json TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_subscriptions (business_id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_notifications (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, delivery_id TEXT, channel TEXT NOT NULL, status TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_network_jobs (id TEXT PRIMARY KEY, business_id TEXT NOT NULL, delivery_id TEXT, quoted_price REAL, platform_fee REAL, external_driver_id TEXT, status TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS rova_delivery_events (id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, event_type TEXT NOT NULL, event_json TEXT NOT NULL, recorded_at TEXT NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS idx_rova_deliveries_status ON rova_deliveries (business_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_rova_deliveries_driver ON rova_deliveries (driver_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_rova_stops_delivery ON rova_delivery_stops (delivery_id, stop_order)`,
+    `CREATE INDEX IF NOT EXISTS idx_rova_events_delivery ON rova_delivery_events (delivery_id, recorded_at)`
+  ];
+  await env.DB.batch(statements.map((sql) => env.DB.prepare(sql)));
+  return true;
+}
+
+async function syncNormalizedProjection(db, env = {}) {
+  if (!(await ensureNormalizedProjection(env))) return false;
+  const updatedAt = nowIso();
+  const businessId = "primary";
+  const statements = [];
+  const add = (sql, ...bindings) => statements.push(env.DB.prepare(sql).bind(...bindings));
+  add(
+    `INSERT INTO rova_businesses (id, name, currency, pickup_address, time_zone, settings_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, currency = excluded.currency, pickup_address = excluded.pickup_address, time_zone = excluded.time_zone, settings_json = excluded.settings_json, updated_at = excluded.updated_at`,
+    businessId,
+    db.company.name,
+    db.company.currency,
+    db.company.pickupAddress,
+    db.company.timeZone,
+    JSON.stringify({ branding: db.company.branding, operations: db.company.operations, notifications: db.company.notifications, network: db.company.network }),
+    updatedAt
+  );
+  if (db.ownerAccount) {
+    add(
+      `INSERT INTO rova_users (id, business_id, role, name, email, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, status = excluded.status, updated_at = excluded.updated_at`,
+      "owner",
+      businessId,
+      "owner",
+      db.ownerAccount.name || "Owner",
+      normalizeEmail(db.ownerAccount.username),
+      "active",
+      updatedAt
+    );
+  }
+  for (const plan of Object.values(PLAN_CATALOG)) {
+    add(
+      `INSERT INTO rova_plans (id, name, monthly_price, currency, limits_json, features_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, monthly_price = excluded.monthly_price, currency = excluded.currency, limits_json = excluded.limits_json, features_json = excluded.features_json, updated_at = excluded.updated_at`,
+      plan.id,
+      plan.name,
+      plan.monthlyPrice,
+      plan.currency,
+      JSON.stringify({ deliveries: plan.deliveryLimit, drivers: plan.driverLimit }),
+      JSON.stringify(plan.features),
+      updatedAt
+    );
+  }
+  add(
+    `INSERT INTO rova_subscriptions (business_id, plan_id, status, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(business_id) DO UPDATE SET plan_id = excluded.plan_id, status = excluded.status, updated_at = excluded.updated_at`,
+    businessId,
+    db.company.planId,
+    db.company.subscriptionStatus,
+    updatedAt
+  );
+  for (const driver of db.drivers) {
+    add(
+      `INSERT INTO rova_drivers (id, business_id, driver_type, name, email, phone, vehicle, status, capacity, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET driver_type = excluded.driver_type, name = excluded.name, email = excluded.email, phone = excluded.phone, vehicle = excluded.vehicle, status = excluded.status, capacity = excluded.capacity, updated_at = excluded.updated_at`,
+      driver.id,
+      businessId,
+      driver.driverType || "my-driver",
+      driver.name,
+      driver.email || "",
+      driver.phone || "",
+      driver.vehicle || "",
+      driver.archivedAt ? "archived" : driver.status || "offline",
+      Number(driver.capacity || 20),
+      updatedAt
+    );
+  }
+  for (const trip of db.trips.slice(-500)) {
+    const customerId = `customer:${trip.id}`;
+    add(
+      `INSERT INTO rova_customers (id, business_id, display_name, address, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, address = excluded.address, updated_at = excluded.updated_at`,
+      customerId,
+      businessId,
+      trip.customerName || "Customer",
+      trip.destination || "",
+      updatedAt
+    );
+    add(
+      `INSERT INTO rova_deliveries (id, business_id, customer_id, driver_id, route_id, status, priority, fulfillment_type, pickup, destination, window_start, window_end, distance_km, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET customer_id = excluded.customer_id, driver_id = excluded.driver_id, route_id = excluded.route_id, status = excluded.status, priority = excluded.priority, fulfillment_type = excluded.fulfillment_type, pickup = excluded.pickup, destination = excluded.destination, window_start = excluded.window_start, window_end = excluded.window_end, distance_km = excluded.distance_km, updated_at = excluded.updated_at`,
+      trip.id,
+      businessId,
+      customerId,
+      trip.driverId || null,
+      trip.routeId || null,
+      trip.status,
+      trip.priority || "standard",
+      trip.fulfillmentType || "my-driver",
+      trip.pickup || "",
+      trip.destination || "",
+      trip.deliveryWindowStart || null,
+      trip.deliveryWindowEnd || null,
+      Number(trip.distanceKm || 0),
+      updatedAt
+    );
+    add(`DELETE FROM rova_delivery_stops WHERE delivery_id = ?`, trip.id);
+    routeStopsForTrip(trip).forEach((stop, index) => add(
+      `INSERT INTO rova_delivery_stops (id, delivery_id, stop_order, label, address, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `${trip.id}:${index}`,
+      trip.id,
+      index,
+      stop.label || `Stop ${index + 1}`,
+      typeof stop.address === "string" ? stop.address : JSON.stringify(stop.address),
+      trip.status,
+      updatedAt
+    ));
+    if (trip.location) {
+      add(
+        `INSERT INTO rova_driver_locations (driver_id, delivery_id, lat, lng, accuracy, recorded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(driver_id) DO UPDATE SET delivery_id = excluded.delivery_id, lat = excluded.lat, lng = excluded.lng, accuracy = excluded.accuracy, recorded_at = excluded.recorded_at, updated_at = excluded.updated_at`,
+        trip.driverId || `unassigned:${trip.id}`,
+        trip.id,
+        Number(trip.location.lat),
+        Number(trip.location.lng),
+        trip.location.accuracy === null || trip.location.accuracy === undefined ? null : Number(trip.location.accuracy),
+        trip.location.timestamp || updatedAt,
+        updatedAt
+      );
+    }
+    if (trip.proof) {
+      add(
+        `INSERT INTO rova_proof_of_delivery (delivery_id, outcome, method, recipient, proof_json, recorded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(delivery_id) DO UPDATE SET outcome = excluded.outcome, method = excluded.method, recipient = excluded.recipient, proof_json = excluded.proof_json, recorded_at = excluded.recorded_at, updated_at = excluded.updated_at`,
+        trip.id,
+        trip.proof.outcome || "",
+        trip.proof.method || "",
+        trip.proof.recipient || "",
+        JSON.stringify(publicProof(trip.proof) || {}),
+        trip.proof.recordedAt || updatedAt,
+        updatedAt
+      );
+    }
+    add(
+      `INSERT INTO rova_delivery_events (id, delivery_id, event_type, event_json, recorded_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET event_type = excluded.event_type, event_json = excluded.event_json, recorded_at = excluded.recorded_at`,
+      `${trip.id}:current`,
+      trip.id,
+      trip.status,
+      JSON.stringify({ outcome: trip.deliveryOutcomeStatus || trip.status, driverId: trip.driverId || null, routeId: trip.routeId || null }),
+      trip.endedAt || trip.startedAt || trip.importedAt || updatedAt
+    );
+    if (trip.routeId) {
+      add(
+        `INSERT INTO rova_routes (id, business_id, driver_id, origin, status, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET driver_id = excluded.driver_id, origin = excluded.origin, status = excluded.status, updated_at = excluded.updated_at`,
+        trip.routeId,
+        businessId,
+        trip.driverId || null,
+        trip.routeOrigin || trip.pickup || "",
+        trip.status === "active" ? "active" : "closed",
+        updatedAt
+      );
+    }
+  }
+  for (let offset = 0; offset < statements.length; offset += 100) {
+    await env.DB.batch(statements.slice(offset, offset + 100));
+  }
+  return true;
+}
+
 async function migrateDb(db) {
   let changed = false;
   if (!db.company || typeof db.company !== "object") {
@@ -492,7 +736,8 @@ async function migrateDb(db) {
     pickupAddress: DEFAULT_PICKUP_ADDRESS,
     timeZone: "America/Toronto",
     supportEmail: "hello@floraljet.llc",
-    plan: "Pilot",
+    plan: "Starter",
+    planId: "starter",
     subscriptionStatus: "setup"
   };
   for (const [key, value] of Object.entries(companyDefaults)) {
@@ -500,6 +745,50 @@ async function migrateDb(db) {
       db.company[key] = value;
       changed = true;
     }
+  }
+  const nestedCompanyDefaults = {
+    branding: {
+      primaryColor: "#176b52",
+      logoUrl: "",
+      trackingHeadline: "Your delivery is on the way",
+      showDriverFirstName: true
+    },
+    operations: {
+      businessHours: "Mon-Fri 9:00 AM-6:00 PM",
+      deliveryZones: "",
+      defaultWindowMinutes: 120,
+      requirePhoto: false,
+      requireSignature: false
+    },
+    notifications: {
+      customerTracking: true,
+      etaUpdates: true,
+      deliveredConfirmation: true
+    },
+    network: { status: "coming-soon", enabled: false }
+  };
+  for (const [section, defaults] of Object.entries(nestedCompanyDefaults)) {
+    if (!db.company[section] || typeof db.company[section] !== "object") {
+      db.company[section] = { ...defaults };
+      changed = true;
+      continue;
+    }
+    for (const [key, value] of Object.entries(defaults)) {
+      if (db.company[section][key] === undefined) {
+        db.company[section][key] = value;
+        changed = true;
+      }
+    }
+  }
+  if (!PLAN_CATALOG[db.company.planId]) {
+    const legacyPlanId = String(db.company.plan || "").toLowerCase();
+    db.company.planId = PLAN_CATALOG[legacyPlanId] ? legacyPlanId : "starter";
+    db.company.plan = PLAN_CATALOG[db.company.planId].name;
+    changed = true;
+  }
+  if (db.normalizedProjectionVersion !== NORMALIZED_PROJECTION_VERSION) {
+    db.normalizedProjectionVersion = NORMALIZED_PROJECTION_VERSION;
+    changed = true;
   }
   if (db.ownerAccount === undefined) {
     db.ownerAccount = null;
@@ -590,6 +879,14 @@ async function migrateDb(db) {
       driver.homeAddress = "";
       changed = true;
     }
+    if (driver.capacity === undefined) {
+      driver.capacity = 20;
+      changed = true;
+    }
+    if (driver.driverType === undefined) {
+      driver.driverType = "my-driver";
+      changed = true;
+    }
   }
   for (const partner of db.courierPartners) {
     if (!COURIER_REQUEST_METHODS.has(partner.requestMethod)) {
@@ -643,6 +940,26 @@ async function migrateDb(db) {
     }
     if (!Array.isArray(trip.path)) {
       trip.path = [];
+      changed = true;
+    }
+    if (!trip.fulfillmentType) {
+      trip.fulfillmentType = trip.courierRequestId ? "courier-partner" : "my-driver";
+      changed = true;
+    }
+    if (!trip.priority) {
+      trip.priority = "standard";
+      changed = true;
+    }
+    if (trip.customerPhone === undefined) {
+      trip.customerPhone = String(trip.notes || "").match(/Phone:\s*([^\n]+)/i)?.[1]?.trim() || "";
+      changed = true;
+    }
+    if (trip.deliveryWindowStart === undefined) {
+      trip.deliveryWindowStart = null;
+      changed = true;
+    }
+    if (trip.deliveryWindowEnd === undefined) {
+      trip.deliveryWindowEnd = null;
       changed = true;
     }
     const priorTrackingStops = JSON.stringify(trip.trackingStops || []);
@@ -724,6 +1041,9 @@ async function writeDb(db, env = {}) {
     throw error;
   }
   db.__persistedUpdatedAt = nextVersion;
+  await syncNormalizedProjection(db, env).catch((error) => {
+    console.error("Normalized Rova projection could not be refreshed", error);
+  });
 }
 
 function publicDriver(driver, options = {}) {
@@ -735,6 +1055,8 @@ function publicDriver(driver, options = {}) {
     vehicle: driver.vehicle,
     shift: driver.shift || "",
     defaultRate: driver.defaultRate,
+    capacity: Number(driver.capacity || 20),
+    driverType: driver.driverType || "my-driver",
     color: driver.color,
     status: driver.status,
     lastSeenAt: driver.lastSeenAt
@@ -1145,11 +1467,13 @@ function publicCustomerTrip(db, trip, trackingStop) {
     status: customerStatus,
     startedAt: trip.startedAt || null,
     endedAt: trip.endedAt || null,
+    etaMinutes: Number.isFinite(Number(trip.etaMinutes)) ? Number(trip.etaMinutes) : null,
+    expectedArrivalAt: trip.expectedArrivalAt || null,
     location: customerVisibleLocation(db, trip),
     stops: destination ? [{ label: "Delivery address", address: destination }] : [],
     driver: driver
       ? {
-          name: driver.name,
+          name: db.company?.branding?.showDriverFirstName === false ? "Your driver" : String(driver.name || "Driver").split(/\s+/)[0],
           vehicle: driver.vehicle,
           color: driver.color
         }
@@ -1169,9 +1493,98 @@ function publicCustomerTrip(db, trip, trackingStop) {
   return output;
 }
 
+function currentPlan(db) {
+  return PLAN_CATALOG[db.company?.planId] || PLAN_CATALOG.starter;
+}
+
+function planFeatureGates(db) {
+  const plan = currentPlan(db);
+  const orderedPlans = Object.values(PLAN_CATALOG);
+  const featureIds = [...new Set(orderedPlans.flatMap((item) => item.features))];
+  return Object.fromEntries(featureIds.map((feature) => {
+    const minimumPlan = orderedPlans.find((item) => item.features.includes(feature));
+    return [feature, {
+      enabled: plan.features.includes(feature),
+      minimumPlanId: minimumPlan?.id || "pro",
+      minimumPlanName: minimumPlan?.name || "Pro"
+    }];
+  }));
+}
+
+function operationsAnalytics(db) {
+  const trips = db.trips || [];
+  const completed = trips.filter((trip) => ["completed", "delivered", "submitted", "approved", "rejected"].includes(trip.status));
+  const failed = trips.filter((trip) => trip.status === "failed" || trip.deliveryOutcomeStatus === "failed");
+  const late = trips.filter((trip) => {
+    if (!trip.deliveryWindowEnd) return false;
+    const deadline = new Date(trip.deliveryWindowEnd).getTime();
+    const finished = trip.endedAt ? new Date(trip.endedAt).getTime() : Date.now();
+    return Number.isFinite(deadline) && finished > deadline && !["queued"].includes(trip.status);
+  });
+  const timedCompleted = completed.filter((trip) => trip.startedAt && trip.endedAt);
+  const durationMinutes = timedCompleted.reduce((total, trip) => {
+    return total + Math.max(0, new Date(trip.endedAt).getTime() - new Date(trip.startedAt).getTime()) / 60000;
+  }, 0);
+  const totalDistance = completed.reduce((total, trip) => total + Number(trip.distanceKm || 0), 0);
+  const totalCost = completed.reduce((total, trip) => total + Number(trip.distanceKm || 0) * Number(trip.kmRate || 0), 0);
+  const timedWindowTrips = completed.filter((trip) => trip.deliveryWindowEnd);
+  const onTime = timedWindowTrips.filter((trip) => new Date(trip.endedAt).getTime() <= new Date(trip.deliveryWindowEnd).getTime()).length;
+  const activeDriverIds = new Set(trips.filter((trip) => trip.driverId && ["active", "completed", "delivered", "submitted", "approved"].includes(trip.status)).map((trip) => trip.driverId));
+  const driverCount = db.drivers.filter((driver) => !driver.archivedAt).length;
+  const deliveriesByDriver = db.drivers.filter((driver) => !driver.archivedAt).map((driver) => ({
+    driverId: driver.id,
+    name: driver.name,
+    completed: completed.filter((trip) => trip.driverId === driver.id).length,
+    active: trips.filter((trip) => trip.driverId === driver.id && trip.status === "active").length
+  }));
+  return {
+    dataSource: "Rova delivery records",
+    scope: "All non-archived deliveries in this workspace",
+    caveat: "Time and on-time metrics appear only when the required timestamps or delivery windows exist.",
+    completed: completed.length,
+    onTimeRate: timedWindowTrips.length ? Math.round((onTime / timedWindowTrips.length) * 100) : null,
+    averageDeliveryMinutes: timedCompleted.length ? Math.round(durationMinutes / timedCompleted.length) : null,
+    averageDistanceKm: completed.length ? Number((totalDistance / completed.length).toFixed(1)) : null,
+    failed: failed.length,
+    late: late.length,
+    driverUtilizationRate: driverCount ? Math.round((activeDriverIds.size / driverCount) * 100) : null,
+    averageCostPerDelivery: completed.length ? Number((totalCost / completed.length).toFixed(2)) : null,
+    deliveriesByDriver
+  };
+}
+
+function operationalAlerts(db) {
+  const now = Date.now();
+  const alerts = [];
+  const plan = currentPlan(db);
+  const activeDriverCount = db.drivers.filter((driver) => !driver.archivedAt).length;
+  const monthPrefix = nowIso().slice(0, 7);
+  const monthlyDeliveryCount = db.trips.filter((trip) => String(trip.importedAt || trip.startedAt || "").startsWith(monthPrefix)).length;
+  if (activeDriverCount >= plan.driverLimit) alerts.push({ type: "plan-drivers", severity: "medium", count: activeDriverCount, message: `${activeDriverCount} of ${plan.driverLimit} plan driver seats are in use` });
+  if (monthlyDeliveryCount >= Math.ceil(plan.deliveryLimit * 0.9)) alerts.push({ type: "plan-deliveries", severity: monthlyDeliveryCount >= plan.deliveryLimit ? "high" : "medium", count: monthlyDeliveryCount, message: `${monthlyDeliveryCount} of ${plan.deliveryLimit} monthly deliveries are recorded` });
+  const unassigned = db.trips.filter((trip) => trip.status === "queued" && !trip.driverId && !trip.courierRequestId);
+  if (unassigned.length) alerts.push({ type: "unassigned", severity: "high", count: unassigned.length, message: `${unassigned.length} queued deliver${unassigned.length === 1 ? "y has" : "ies have"} no driver` });
+  const late = db.trips.filter((trip) => trip.status === "active" && trip.deliveryWindowEnd && new Date(trip.deliveryWindowEnd).getTime() < now);
+  if (late.length) alerts.push({ type: "late", severity: "high", count: late.length, message: `${late.length} active deliver${late.length === 1 ? "y is" : "ies are"} past the delivery window` });
+  const stale = db.trips.filter((trip) => trip.status === "active" && trip.location?.timestamp && now - new Date(trip.location.timestamp).getTime() > 15 * 60 * 1000);
+  if (stale.length) alerts.push({ type: "stale-location", severity: "medium", count: stale.length, message: `${stale.length} active driver location${stale.length === 1 ? " has" : "s have"} not updated in 15 minutes` });
+  return alerts;
+}
+
 function snapshot(db, env) {
   return {
     company: companyForEnv(db, env),
+    plans: Object.values(PLAN_CATALOG),
+    planAccess: currentPlan(db),
+    featureGates: planFeatureGates(db),
+    analytics: operationsAnalytics(db),
+    alerts: operationalAlerts(db),
+    dispatchAssistant: {
+      mode: "explainable-rules",
+      aiConnected: false,
+      label: "Explainable dispatch recommendations",
+      note: "Rova uses current workload, driver availability, route order, delivery priority, and time windows. No generative AI provider is connected."
+    },
     weekKey: weekKey(),
     integrations: integrationsStatus(db, env),
     invitationEmail: {
@@ -1289,13 +1702,13 @@ function mapsConfig(env = {}) {
 async function optimizedStopOrder(env, origin, destinations) {
   const apiKey = String(env.GOOGLE_MAPS_SERVER_API_KEY || env.GOOGLE_MAPS_API_KEY || "").trim();
   const fallbackOrder = destinations.map((_, index) => index);
-  if (!apiKey || destinations.length < 2) return { order: fallbackOrder, optimized: false };
+  if (!apiKey || destinations.length < 2) return { order: fallbackOrder, optimized: false, distanceKm: null, durationMinutes: null };
   const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-goog-api-key": apiKey,
-      "x-goog-fieldmask": "routes.optimizedIntermediateWaypointIndex"
+      "x-goog-fieldmask": "routes.optimizedIntermediateWaypointIndex,routes.distanceMeters,routes.duration"
     },
     body: JSON.stringify({
       origin: { address: origin },
@@ -1306,12 +1719,92 @@ async function optimizedStopOrder(env, origin, destinations) {
       optimizeWaypointOrder: true
     })
   });
-  if (!response.ok) return { order: fallbackOrder, optimized: false };
+  if (!response.ok) return { order: fallbackOrder, optimized: false, distanceKm: null, durationMinutes: null };
   const payload = await response.json();
-  const order = payload.routes?.[0]?.optimizedIntermediateWaypointIndex;
+  const route = payload.routes?.[0] || {};
+  const order = route.optimizedIntermediateWaypointIndex;
+  const durationSeconds = Number(String(route.duration || "").replace(/s$/, ""));
+  const summary = {
+    distanceKm: Number.isFinite(Number(route.distanceMeters)) ? Number((Number(route.distanceMeters) / 1000).toFixed(1)) : null,
+    durationMinutes: Number.isFinite(durationSeconds) ? Math.round(durationSeconds / 60) : null
+  };
   return Array.isArray(order) && order.length === destinations.length
-    ? { order, optimized: true }
-    : { order: fallbackOrder, optimized: false };
+    ? { order, optimized: true, ...summary }
+    : { order: fallbackOrder, optimized: false, ...summary };
+}
+
+function optimizationCandidates(db, requestedIds = null) {
+  const trips = db.trips
+    .filter((trip) => trip.status === "queued" && !openCourierRequestForTrip(db, trip.id) && (!requestedIds || requestedIds.has(trip.id)))
+    .sort((left, right) => {
+      const priorityRank = { urgent: 0, priority: 1, standard: 2 };
+      const priorityDelta = (priorityRank[left.priority] ?? 2) - (priorityRank[right.priority] ?? 2);
+      if (priorityDelta) return priorityDelta;
+      const leftWindow = left.deliveryWindowEnd ? new Date(left.deliveryWindowEnd).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightWindow = right.deliveryWindowEnd ? new Date(right.deliveryWindowEnd).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftWindow - rightWindow || new Date(left.importedAt || 0) - new Date(right.importedAt || 0);
+    });
+  const drivers = db.drivers.filter((driver) => {
+    return driver.status !== "offline"
+      && Boolean(driver.passwordHash || driver.inviteAcceptedAt)
+      && !activeRouteStateForDriver(db, driver.id).conflict;
+  });
+  return { trips, drivers };
+}
+
+async function buildOptimizationPlan(db, env, requestedIds = null) {
+  const { trips, drivers } = optimizationCandidates(db, requestedIds);
+  if (!trips.length) throw new Error("There are no queued orders to optimize.");
+  if (!drivers.length) throw new Error("Add an available driver before optimizing deliveries.");
+  const load = new Map(drivers.map((driver) => [driver.id, db.trips.filter((trip) => trip.driverId === driver.id && trip.status === "active").length]));
+  const groups = new Map(drivers.map((driver) => [driver.id, []]));
+  for (const trip of trips) {
+    const eligible = drivers.filter((driver) => load.get(driver.id) < Number(driver.capacity || 20));
+    if (!eligible.length) throw new Error("Every available driver is at capacity. Increase capacity or add another driver.");
+    const driver = eligible.slice().sort((left, right) => (load.get(left.id) - load.get(right.id)) || String(left.name).localeCompare(String(right.name)))[0];
+    groups.get(driver.id).push(trip);
+    load.set(driver.id, load.get(driver.id) + 1);
+  }
+  const recommendations = [];
+  for (const driver of drivers) {
+    const group = groups.get(driver.id);
+    if (!group.length) continue;
+    const existingRoute = activeRouteStateForDriver(db, driver.id);
+    const origin = existingRoute.trips.at(-1)?.destination || workspacePickupAddress(db);
+    const routePlan = await optimizedStopOrder(env, origin, group.map((trip) => trip.destination));
+    const orderedTrips = routePlan.order.map((index) => group[index]);
+    recommendations.push({
+      driverId: driver.id,
+      driverName: driver.name,
+      currentStops: existingRoute.trips.length,
+      capacity: Number(driver.capacity || 20),
+      origin,
+      optimized: routePlan.optimized,
+      estimatedDistanceKm: routePlan.distanceKm,
+      estimatedDurationMinutes: routePlan.durationMinutes,
+      expectedCompletionAt: routePlan.durationMinutes ? new Date(Date.now() + routePlan.durationMinutes * 60000).toISOString() : null,
+      tripIds: orderedTrips.map((trip) => trip.id),
+      stops: orderedTrips.map((trip, index) => ({
+        order: index + 1,
+        tripId: trip.id,
+        customerName: trip.customerName,
+        destination: trip.destination,
+        priority: trip.priority || "standard",
+        deliveryWindowEnd: trip.deliveryWindowEnd || null
+      })),
+      reason: existingRoute.trips.length
+        ? `Adds these stops to ${driver.name}'s current route while balancing total workload.`
+        : `${driver.name} has the lightest available workload and capacity for these stops.`
+    });
+  }
+  return {
+    generatedAt: nowIso(),
+    engine: recommendations.some((item) => item.optimized) ? "google-routes-plus-rules" : "explainable-rules",
+    canEstimateRoute: recommendations.some((item) => item.estimatedDurationMinutes !== null),
+    totalDeliveries: trips.length,
+    recommendations,
+    explanation: "Priority orders and earliest delivery windows are considered first. Rova then balances active workload and driver capacity before ordering each route."
+  };
 }
 
 function setupCode(env = {}) {
@@ -1736,11 +2229,16 @@ function wixOrderToTrip(order, config, env) {
     id: makeId("trip"),
     driverId: "",
     customerName: wixOrderCustomerName(order),
+    customerPhone: String(wixOrderContact(order).phone || wixOrderContact(order).phoneNumber || "").trim(),
     pickup: config.pickupLabel,
     destination: address || "Delivery address missing",
     stops: buildRouteStops(config.pickupLabel, address || "Delivery address missing", []),
     kmRate: Number(env?.WIX_DEFAULT_KM_RATE || 0),
     tripType: "business",
+    fulfillmentType: "my-driver",
+    priority: "standard",
+    deliveryWindowStart: null,
+    deliveryWindowEnd: null,
     status: "queued",
     shareToken: makeToken(),
     startedAt: null,
@@ -2000,7 +2498,9 @@ function channelOrderToTrip(order, connection, env) {
   const notes = [`${providerLabel(provider)} order #${order.number || order.id}`, order.phone ? `Phone: ${order.phone}` : "", order.items ? `Items: ${order.items}` : ""].filter(Boolean).join("\n");
   const trip = {
     id: makeId("trip"), driverId: "", customerName: order.customerName || `${providerLabel(provider)} customer`, pickup, destination,
+    customerPhone: String(order.phone || "").trim(),
     stops: buildRouteStops(pickup, destination, []), kmRate: Number(env?.WIX_DEFAULT_KM_RATE || 0), tripType: "business", status: "queued",
+    fulfillmentType: "my-driver", priority: "standard", deliveryWindowStart: null, deliveryWindowEnd: null,
     shareToken: makeToken(), startedAt: null, endedAt: null, submittedAt: null, reviewedAt: null, approvalNotes: "", notes,
     path: [], location: null, distanceKm: 0, importedAt: nowIso(),
     source: { system: provider, connectionId: connection.id, orderId: order.id, orderNumber: String(order.number || ""), createdDate: order.createdAt || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.orderStatus || "" }
@@ -2311,11 +2811,19 @@ async function handleApi(request, env, url) {
     const timeZone = String(body.timeZone || "").trim();
     const currency = String(body.currency || "").trim().toUpperCase();
     const supportEmail = normalizeEmail(body.supportEmail);
+    const primaryColor = String(body.brandPrimaryColor || db.company.branding?.primaryColor || "#176b52").trim();
+    const logoUrl = String(body.logoUrl || "").trim();
+    const trackingHeadline = String(body.trackingHeadline || "Your delivery is on the way").trim();
+    const defaultWindowMinutes = Number(body.defaultWindowMinutes || 120);
     if (name.length < 2) return badRequest("Company name is required.");
     if (pickupAddress.length < 5) return badRequest("Enter a valid pickup or depot address.");
     if (!timeZone.includes("/")) return badRequest("Choose a valid time zone.");
     if (!["CAD", "USD"].includes(currency)) return badRequest("Choose CAD or USD.");
     if (!validEmail(supportEmail)) return badRequest("Enter a valid support email.");
+    if (!/^#[0-9a-f]{6}$/i.test(primaryColor)) return badRequest("Choose a valid six-digit brand colour.");
+    if (logoUrl && !normalizedPublicHttpsUrl(logoUrl)) return badRequest("Logo URL must use a public HTTPS address.");
+    if (trackingHeadline.length < 4 || trackingHeadline.length > 90) return badRequest("Tracking-page wording must be between 4 and 90 characters.");
+    if (!Number.isFinite(defaultWindowMinutes) || defaultWindowMinutes < 15 || defaultWindowMinutes > 1440) return badRequest("Default delivery window must be between 15 and 1,440 minutes.");
     db.company = {
       ...db.company,
       name,
@@ -2323,6 +2831,26 @@ async function handleApi(request, env, url) {
       timeZone,
       currency,
       supportEmail,
+      branding: {
+        ...db.company.branding,
+        primaryColor,
+        logoUrl,
+        trackingHeadline,
+        showDriverFirstName: body.showDriverFirstName === true || body.showDriverFirstName === "on"
+      },
+      operations: {
+        ...db.company.operations,
+        businessHours: String(body.businessHours || "").trim(),
+        deliveryZones: String(body.deliveryZones || "").trim(),
+        defaultWindowMinutes,
+        requirePhoto: body.requirePhoto === true || body.requirePhoto === "on",
+        requireSignature: body.requireSignature === true || body.requireSignature === "on"
+      },
+      notifications: {
+        customerTracking: body.customerTracking === true || body.customerTracking === "on",
+        etaUpdates: body.etaUpdates === true || body.etaUpdates === "on",
+        deliveredConfirmation: body.deliveredConfirmation === true || body.deliveredConfirmation === "on"
+      },
       updatedAt: nowIso()
     };
     await writeDb(db, env);
@@ -2710,6 +3238,8 @@ async function handleApi(request, env, url) {
     if (db.drivers.some((item) => normalizeEmail(item.email) === email)) {
       return badRequest("A driver with this email already exists.");
     }
+    const capacity = Number(body.capacity || 20);
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 100) return badRequest("Driver capacity must be between 1 and 100 stops.");
     const driver = {
       id: makeId("drv"),
       name: String(body.name).trim(),
@@ -2720,6 +3250,8 @@ async function handleApi(request, env, url) {
       shift: String(body.shift || "").trim(),
       loginId: email,
       defaultRate: Number(body.defaultRate || 1),
+      capacity,
+      driverType: "my-driver",
       color: body.color || "#2563eb",
       status: "offline",
       lastSeenAt: null
@@ -2786,6 +3318,11 @@ async function handleApi(request, env, url) {
       await setPassword(driver, password);
     }
     if (body.defaultRate !== undefined) driver.defaultRate = Number(body.defaultRate);
+    if (body.capacity !== undefined) {
+      const capacity = Number(body.capacity);
+      if (!Number.isInteger(capacity) || capacity < 1 || capacity > 100) return badRequest("Driver capacity must be between 1 and 100 stops.");
+      driver.capacity = capacity;
+    }
     let invitation = null;
     if (identityChanged) {
       db.sessions = (db.sessions || []).filter((item) => item.driverId !== driver.id);
@@ -2837,6 +3374,60 @@ async function handleApi(request, env, url) {
     });
   }
 
+  if (method === "POST" && url.pathname === "/api/deliveries") {
+    if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const body = await readBody(request);
+    const customerName = String(body.customerName || "").trim();
+    const pickup = String(body.pickup || workspacePickupAddress(db)).trim();
+    const destination = String(body.destination || "").trim();
+    const priority = ["standard", "priority", "urgent"].includes(String(body.priority || "").toLowerCase())
+      ? String(body.priority).toLowerCase()
+      : "standard";
+    if (!customerName) return badRequest("Customer name is required.");
+    if (pickup.length < 3 || destination.length < 3) return badRequest("Pickup and destination are required.");
+    const deliveryWindowStart = optionalIso(body.deliveryWindowStart);
+    const deliveryWindowEnd = optionalIso(body.deliveryWindowEnd);
+    if (deliveryWindowStart === undefined || deliveryWindowEnd === undefined) return badRequest("Enter a valid delivery window.");
+    if (deliveryWindowStart && deliveryWindowEnd && new Date(deliveryWindowEnd) <= new Date(deliveryWindowStart)) {
+      return badRequest("Delivery window end must be after the start.");
+    }
+    const trip = {
+      id: makeId("trip"),
+      driverId: "",
+      customerName,
+      customerPhone: String(body.customerPhone || "").trim(),
+      pickup,
+      destination,
+      stops: buildRouteStops(pickup, destination, body.stops || body.stopsText),
+      kmRate: 0,
+      tripType: "business",
+      fulfillmentType: "my-driver",
+      priority,
+      deliveryWindowStart,
+      deliveryWindowEnd,
+      status: "queued",
+      deliveryOutcomeStatus: "queued",
+      shareToken: makeToken(),
+      importedAt: nowIso(),
+      startedAt: null,
+      endedAt: null,
+      submittedAt: null,
+      reviewedAt: null,
+      approvalNotes: "",
+      notes: String(body.notes || "").trim(),
+      path: [],
+      location: null,
+      distanceKm: 0,
+      source: { system: "manual", orderId: makeId("manual"), orderNumber: "Manual", createdDate: nowIso() }
+    };
+    syncTrackingStops(trip);
+    db.trips.push(trip);
+    await writeDb(db, env);
+    const nextSnapshot = snapshot(db, env);
+    broadcastSnapshot(db, env);
+    return sendJson({ delivery: publicTrip(db, trip), snapshot: nextSnapshot }, 201);
+  }
+
   if (method === "POST" && url.pathname === "/api/trips") {
     if (!session) return unauthorized();
     const body = await readBody(request);
@@ -2846,15 +3437,26 @@ async function handleApi(request, env, url) {
     if (!driver) return badRequest("A valid driver is required.");
     const pickup = String(body.pickup || workspacePickupAddress(db)).trim();
     const destination = String(body.destination || "Destination").trim();
+    const deliveryWindowStart = optionalIso(body.deliveryWindowStart);
+    const deliveryWindowEnd = optionalIso(body.deliveryWindowEnd);
+    if (deliveryWindowStart === undefined || deliveryWindowEnd === undefined) return badRequest("Enter a valid delivery window.");
+    if (deliveryWindowStart && deliveryWindowEnd && new Date(deliveryWindowEnd) <= new Date(deliveryWindowStart)) {
+      return badRequest("Delivery window end must be after the start.");
+    }
     const trip = {
       id: makeId("trip"),
       driverId: driver.id,
       customerName: String(body.customerName || "Customer").trim(),
+      customerPhone: String(body.customerPhone || "").trim(),
       pickup,
       destination,
       stops: buildRouteStops(pickup, destination, body.stops || body.stopsText),
       kmRate: Number(body.kmRate || driver.defaultRate || 1),
       tripType: "business",
+      fulfillmentType: "my-driver",
+      priority: ["standard", "priority", "urgent"].includes(String(body.priority || "").toLowerCase()) ? String(body.priority).toLowerCase() : "standard",
+      deliveryWindowStart,
+      deliveryWindowEnd,
       status: "active",
       deliveryOutcomeStatus: "active",
       shareToken: makeToken(),
@@ -2951,53 +3553,59 @@ async function handleApi(request, env, url) {
     return sendJson({ uploaded: candidates.map((item) => item.kind), proofMedia: { configured: true } }, 201);
   }
 
+  if (method === "POST" && url.pathname === "/api/routes/recommendations") {
+    if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const body = await readBody(request);
+    const requestedIds = Array.isArray(body.tripIds) ? new Set(body.tripIds.map(String)) : null;
+    try {
+      return sendJson({ plan: await buildOptimizationPlan(db, env, requestedIds) });
+    } catch (error) {
+      return badRequest(error.message || "Rova could not prepare an optimization plan.");
+    }
+  }
+
   if (method === "POST" && url.pathname === "/api/routes/auto-assign") {
     if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
     const body = await readBody(request);
     const requestedIds = Array.isArray(body.tripIds) ? new Set(body.tripIds.map(String)) : null;
-    const trips = db.trips.filter((trip) => trip.status === "queued" && !openCourierRequestForTrip(db, trip.id) && (!requestedIds || requestedIds.has(trip.id)));
-    if (!trips.length) return badRequest("There are no queued orders to assign.");
-    const drivers = db.drivers.filter((driver) => {
-      return driver.status !== "offline"
-        && Boolean(driver.passwordHash || driver.inviteAcceptedAt)
-        && !activeRouteStateForDriver(db, driver.id).conflict;
-    });
-    if (!drivers.length) return badRequest("Add an available driver before assigning orders.");
-    const load = new Map(drivers.map((driver) => [driver.id, db.trips.filter((trip) => trip.driverId === driver.id && trip.status === "active").length]));
-    const groups = new Map(drivers.map((driver) => [driver.id, []]));
-    for (const trip of trips) {
-      const driver = drivers.slice().sort((left, right) => (load.get(left.id) - load.get(right.id)) || String(left.name).localeCompare(String(right.name)))[0];
-      trip.driverId = driver.id;
-      trip.kmRate = Number(driver.defaultRate || 1);
-      groups.get(driver.id).push(trip);
-      load.set(driver.id, load.get(driver.id) + 1);
+    let plan;
+    try {
+      plan = await buildOptimizationPlan(db, env, requestedIds);
+    } catch (error) {
+      return badRequest(error.message || "Rova could not optimize these deliveries.");
     }
     let optimizedRoutes = 0;
-    for (const driver of drivers) {
-      const group = groups.get(driver.id);
-      if (!group.length) continue;
+    const appliedTrips = [];
+    for (const recommendation of plan.recommendations) {
+      const driver = db.drivers.find((item) => item.id === recommendation.driverId);
+      if (!driver) continue;
+      const orderedTrips = recommendation.tripIds.map((id) => db.trips.find((trip) => trip.id === id)).filter(Boolean);
       const origin = workspacePickupAddress(db);
-      const existingRoute = activeRouteStateForDriver(db, driver.id);
-      const planningOrigin = existingRoute.trips.at(-1)?.destination || origin;
-      const routePlan = await optimizedStopOrder(env, planningOrigin, group.map((trip) => trip.destination));
-      const orderedTrips = routePlan.order.map((index) => group[index]);
       const startedAt = nowIso();
-      orderedTrips.forEach((trip) => {
+      orderedTrips.forEach((trip, index) => {
         resetTripForDispatch(trip);
+        trip.driverId = driver.id;
+        trip.kmRate = Number(driver.defaultRate || 1);
         trip.status = "active";
         trip.deliveryOutcomeStatus = "active";
         trip.startedAt = startedAt;
         trip.endedAt = null;
         trip.tripType = "business";
+        trip.fulfillmentType = "my-driver";
+        trip.etaMinutes = recommendation.estimatedDurationMinutes === null
+          ? null
+          : Math.round((recommendation.estimatedDurationMinutes / orderedTrips.length) * (index + 1));
+        trip.expectedArrivalAt = trip.etaMinutes ? new Date(Date.now() + trip.etaMinutes * 60000).toISOString() : null;
       });
       attachTripsToDriverRoute(db, driver, orderedTrips, origin);
       driver.status = "en-route";
-      if (routePlan.optimized) optimizedRoutes += 1;
+      if (recommendation.optimized) optimizedRoutes += 1;
+      appliedTrips.push(...orderedTrips);
     }
     await writeDb(db, env);
     const nextSnapshot = snapshot(db, env);
     broadcastSnapshot(db, env);
-    return sendJson({ assigned: trips.length, optimizedRoutes, snapshot: nextSnapshot }, 201);
+    return sendJson({ assigned: appliedTrips.length, optimizedRoutes, plan, snapshot: nextSnapshot }, 201);
   }
 
   if (method === "POST" && url.pathname === "/api/routes/dispatch") {
@@ -3224,6 +3832,24 @@ async function handleApi(request, env, url) {
     for (const key of ["customerName", "pickup", "destination", "notes"]) {
       if (body[key] !== undefined) trip[key] = String(body[key]).trim();
     }
+    if (body.priority !== undefined) {
+      const priority = String(body.priority || "").toLowerCase();
+      if (!["standard", "priority", "urgent"].includes(priority)) return badRequest("Choose a valid delivery priority.");
+      trip.priority = priority;
+    }
+    if (body.deliveryWindowStart !== undefined) {
+      const value = optionalIso(body.deliveryWindowStart);
+      if (value === undefined) return badRequest("Enter a valid delivery window start.");
+      trip.deliveryWindowStart = value;
+    }
+    if (body.deliveryWindowEnd !== undefined) {
+      const value = optionalIso(body.deliveryWindowEnd);
+      if (value === undefined) return badRequest("Enter a valid delivery window end.");
+      trip.deliveryWindowEnd = value;
+    }
+    if (trip.deliveryWindowStart && trip.deliveryWindowEnd && new Date(trip.deliveryWindowEnd) <= new Date(trip.deliveryWindowStart)) {
+      return badRequest("Delivery window end must be after the start.");
+    }
     if (!trip.customerName || !trip.pickup || !trip.destination) {
       return badRequest("Customer, pickup, and destination are required.");
     }
@@ -3428,6 +4054,12 @@ async function handleApi(request, env, url) {
     const outcomeId = requestedOutcomeId || (isDispatcher(session) ? "dispatcher-override" : "delivered-recipient");
     const outcome = DELIVERY_OUTCOMES.get(outcomeId);
     if (outcome.override && !isDispatcher(session)) return unauthorized("Only dispatch can record an override.");
+    if (session.role === "driver" && !outcome.exception && !outcome.failed && db.company?.operations?.requirePhoto && !trip.pendingProofMedia?.photo) {
+      return badRequest("This workspace requires a delivery photo before completing the stop.");
+    }
+    if (session.role === "driver" && !outcome.exception && !outcome.failed && db.company?.operations?.requireSignature && !trip.pendingProofMedia?.signature) {
+      return badRequest("This workspace requires a recipient signature before completing the stop.");
+    }
     if (outcomeId === "verified" && !trip.pendingProofMedia?.signature) {
       return badRequest("Collect a recipient signature before recording Signature collected.");
     }

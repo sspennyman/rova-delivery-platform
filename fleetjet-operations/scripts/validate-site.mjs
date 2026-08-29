@@ -13,7 +13,8 @@ const requiredFiles = [
   "dist/client/manifest.webmanifest",
   "dist/client/assets/rova-logo.png",
   "dist/client/assets/rova-mark.svg",
-  "dist/.openai/hosting.json"
+  "dist/.openai/hosting.json",
+  "dist/.openai/drizzle/0001_rova_normalized_projection.sql"
 ];
 
 for (const relativePath of requiredFiles) {
@@ -27,9 +28,9 @@ const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
 assert.match(appHtml, /id="app"/, "the public root should load the Rova application shell");
 assert.match(appHtml, /delivery-driver-tracker\.spennyman\.chatgpt\.site[\s\S]*app\.floraljet\.llc/, "the app shell should replace the old alias before rendering");
-assert.match(appHtml, /app\.js\?v=38/, "the public root should load the latest Rova app bundle");
+assert.match(appHtml, /app\.js\?v=39/, "the public root should load the latest Rova app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
-assert.match(operationsHtml, /app\.js\?v=38/, "the dispatcher route should load the latest Rova app bundle");
+assert.match(operationsHtml, /app\.js\?v=39/, "the dispatcher route should load the latest Rova app bundle");
 
 const hosting = JSON.parse(fs.readFileSync(path.join(root, "dist/.openai/hosting.json"), "utf8"));
 if (!hosting.project_id) {
@@ -41,8 +42,14 @@ const stylesSource = fs.readFileSync(path.join(root, "dist/client/styles.css"), 
 assert.match(appSource, /Run the delivery day without the chaos/, "the app subdomain should render the Rova login portal");
 assert.match(appSource, /Rova app/, "the app portal should use the Rova company name");
 assert.match(appSource, /Business profile/, "dispatcher workspaces should include operational settings");
-assert.match(appSource, /Pay setup or invoice/, "dispatcher workspaces should include billing access");
+assert.match(appSource, /Nothing on this page creates a charge/, "plan settings must not create accidental charges");
 assert.match(appSource, /Balance orders/, "dispatcher workspaces should expose workload balancing without overstating AI");
+assert.match(appSource, /Smart Dispatch/, "the dispatcher should expose explainable route recommendations");
+assert.match(appSource, /Optimize deliveries/, "dispatchers should be able to preview a route plan before applying it");
+assert.match(appSource, /Live operations data/, "analytics should identify the source of its operational metrics");
+assert.match(appSource, /Route capacity/, "driver profiles should include capacity for workload planning");
+assert.match(appSource, /Add or connect orders/, "onboarding should support manual entry without forcing an integration");
+assert.match(appSource, /Next delivery/, "the mobile driver workflow should make the next stop obvious");
 assert.match(appSource, /First time here\?/, "the app login should explain driver invite passwords");
 assert.doesNotMatch(appSource, /lead-capture-form|Request demo|Request pilot/, "the app subdomain should not expose a public sales form");
 assert.match(appSource, /Private dispatcher workspace for inbound requests/, "the dispatcher app should include the private accounts workspace");
@@ -208,6 +215,9 @@ assert.doesNotMatch(database.row.payload_json, /validation-password/, "the saved
 assert.equal(setupPayload.snapshot.invitationEmail.configured, false, "the UI should expose manual sharing when email delivery is not configured");
 assert.equal(setupPayload.snapshot.courierEmail.configured, false, "courier email must stay in prepared-request mode until a dedicated sender is configured");
 assert.equal(setupPayload.snapshot.proofMedia.configured, true, "the UI should expose attached proof storage");
+assert.equal(setupPayload.snapshot.planAccess.monthlyPrice, 99, "new workspaces should expose Starter pricing without charging the account");
+assert.equal(setupPayload.snapshot.dispatchAssistant.aiConnected, false, "the rules engine must not be presented as connected generative AI");
+assert.equal(setupPayload.snapshot.analytics.dataSource, "Rova delivery records", "analytics should describe its source");
 
 const reloadedWorker = await loadFreshWorker("reload");
 const persistedResponse = await reloadedWorker.default.fetch(
@@ -783,6 +793,8 @@ for (const [index, trackingStop] of multiStopTrip.trackingStops.entries()) {
     "customerName",
     "driver",
     "endedAt",
+    "etaMinutes",
+    "expectedArrivalAt",
     "id",
     "location",
     "startedAt",
@@ -1593,6 +1605,23 @@ const courierPartnerArchiveResponse = await reloadedWorker.default.fetch(
 );
 assert.equal(courierPartnerArchiveResponse.status, 200, "completed courier partners should be archivable without deleting request history");
 
+const recommendationResponse = await reloadedWorker.default.fetch(
+  new Request("https://vms.test/api/routes/recommendations", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${setupPayload.session.token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ tripIds: [webhookTrip.id] })
+  }),
+  env
+);
+assert.equal(recommendationResponse.status, 200, "queued orders should support a non-mutating dispatch preview");
+const recommendationPayload = await recommendationResponse.json();
+assert.equal(recommendationPayload.plan.totalDeliveries, 1);
+assert.equal(recommendationPayload.plan.recommendations[0].tripIds[0], webhookTrip.id);
+assert.match(recommendationPayload.plan.explanation, /Priority orders and earliest delivery windows/);
+
 const autoAssignResponse = await reloadedWorker.default.fetch(
   new Request("https://vms.test/api/routes/auto-assign", {
     method: "POST",
@@ -1611,5 +1640,30 @@ const assignedWebhookTrip = autoAssignPayload.snapshot.trips.find((trip) => trip
 assert.equal(assignedWebhookTrip.status, "active");
 assert.equal(assignedWebhookTrip.driverId, driverCreatePayload.driver.id);
 assert.equal(assignedWebhookTrip.routeOrigin, "Private warehouse", "new work should append to the driver’s continuous active route instead of sending them back through the depot");
+
+const manualDeliveryResponse = await reloadedWorker.default.fetch(
+  new Request("https://vms.test/api/deliveries", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${setupPayload.session.token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      customerName: "Manual customer",
+      customerPhone: "+16135550199",
+      pickup: "Private warehouse",
+      destination: "123 Manual St, Ottawa",
+      priority: "urgent",
+      deliveryWindowStart: "2026-08-29T14:00:00-04:00",
+      deliveryWindowEnd: "2026-08-29T16:00:00-04:00"
+    })
+  }),
+  env
+);
+assert.equal(manualDeliveryResponse.status, 201, "dispatchers should be able to queue an order without connecting a store");
+const manualDeliveryPayload = await manualDeliveryResponse.json();
+assert.equal(manualDeliveryPayload.delivery.status, "queued");
+assert.equal(manualDeliveryPayload.delivery.priority, "urgent");
+assert.equal(manualDeliveryPayload.delivery.customerPhone, "+16135550199");
 
 console.log("Sites bundle validated.");

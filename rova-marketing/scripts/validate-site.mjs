@@ -48,7 +48,7 @@ async function expectStatus(pathname, status, contains = null) {
 }
 
 await expectStatus("/", 200, /Rova/);
-await expectStatus("/", 200, /Dispatch every stop/);
+await expectStatus("/", 200, /Local delivery,[\s\S]*on autopilot/);
 await expectStatus("/", 200, /Every delivery has an owner, a route, a status, and a completion record/);
 await expectStatus("/", 200, /Invitation-only driver accounts/);
 await expectStatus("/", 200, /The paid route can start at home/);
@@ -57,7 +57,7 @@ await expectStatus("/demo.html", 200, /Add delivery/);
 await expectStatus("/demo.html", 200, /AI Assign \+ Optimize/);
 await expectStatus("/demo.html", 200, /Check capacity/);
 await expectStatus("/pricing.html", 200, /Plans that scale with your delivery team/);
-await expectStatus("/pricing.html", 200, /\$249-\$1,500\+\/mo/);
+await expectStatus("/pricing.html", 200, /\$99-\$399\/mo/);
 await expectStatus("/pricing.html", 200, /Flexible plans for different delivery teams/);
 await expectStatus("/industries.html", 200, /Built for businesses using their own drivers, courier partners, or both/);
 await expectStatus("/contact.html", 200, /See Rova with your orders, delivery capacity, and workflow/);
@@ -83,11 +83,11 @@ assert.doesNotMatch(homepage, /future module/i);
 assert.match(homepage, /Connect stores and webhooks/, "the homepage should describe the supported connection workflow clearly");
 assert.match(homepage, /Shopify[\s\S]*WooCommerce[\s\S]*Wix/, "the homepage should name supported direct commerce connections");
 assert.match(homepage, /single-use link that expires after seven days/i, "the homepage should explain driver invitation security");
-assert.match(homepage, /Plans start at \$249 CAD per month/, "the homepage should make the pricing starting point visible");
+assert.match(homepage, /Plans start at \$99 CAD per month/, "the homepage should make the pricing starting point visible");
 assert.match(homepage, /Home → Work and Depot → Home/, "the homepage should explain paid home-route support");
 assert.match(homepage, /Proof and exception records[\s\S]*photo or recipient signature/i, "the homepage should describe the released proof workflow");
-assert.match(homepage, /in-house and courier delivery/, "the homepage should position Rova for hybrid local-delivery operations");
-assert.match(homepage, /In-house \+ courier dispatch[\s\S]*Photo \+ signature proof[\s\S]*Plans from \$249 CAD/, "the hero should lead with released product proof and transparent pricing");
+assert.match(homepage, /own drivers and third-party couriers/i, "the homepage should position Rova for hybrid local-delivery operations");
+assert.match(homepage, /Set up in under 10 minutes[\s\S]*Your drivers \+ courier partners[\s\S]*Plans from \$99 CAD/, "the hero should lead with fast setup, flexible fulfilment, and transparent pricing");
 assert.match(homepage, /own drivers and third-party couriers[\s\S]*request, status, reference number, fee, and tracking link/i, "the homepage should explain the released courier-partner workflow");
 assert.match(homepage, /clearly marked as not sent/i, "courier request copy must distinguish prepared requests from sent messages");
 assert.doesNotMatch(homepage, /Coming next|Rova Driver pilot/, "the primary sales page should not present unreleased roadmap work as current product value");
