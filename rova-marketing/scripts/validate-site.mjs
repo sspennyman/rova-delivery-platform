@@ -47,7 +47,7 @@ async function expectStatus(pathname, status, contains = null) {
   }
 }
 
-await expectStatus("/", 200, /Rova/);
+await expectStatus("/", 200, /Rivo/);
 await expectStatus("/", 200, /Local delivery,[\s\S]*on autopilot/);
 await expectStatus("/", 200, /Every delivery has an owner, a route, a status, and a completion record/);
 await expectStatus("/", 200, /Invitation-only driver accounts/);
@@ -60,11 +60,12 @@ await expectStatus("/pricing.html", 200, /Plans that scale with your delivery te
 await expectStatus("/pricing.html", 200, /\$99-\$399\/mo/);
 await expectStatus("/pricing.html", 200, /Flexible plans for different delivery teams/);
 await expectStatus("/industries.html", 200, /Built for businesses using their own drivers, courier partners, or both/);
-await expectStatus("/contact.html", 200, /See Rova with your orders, delivery capacity, and workflow/);
+await expectStatus("/contact.html", 200, /See Rivo with your orders, delivery capacity, and workflow/);
 await expectStatus("/contact.html", 200, /https:\/\/app\.floraljet\.llc\/api\/leads/);
 await expectStatus("/contact.html", 200, /id="sales-form"/);
 await expectStatus("/assets/rova-logo.png", 200);
 await expectStatus("/assets/rova-mark.svg", 200);
+await expectStatus("/assets/rivo-logo.png", 200);
 await expectStatus("/assets/rova-app-preview.jpg", 200);
 await expectStatus("/assets/rova-animated-ad.mp4", 200);
 await expectStatus("/assets/rova-animated-ad-poster.jpg", 200);
@@ -73,7 +74,7 @@ await expectStatus("/favicon.ico", 200);
 await expectStatus("/missing-page", 404);
 
 const homepage = await (await worker.default.fetch(new Request("https://floraljet.test/"), env)).text();
-assert.match(homepage, /href="https:\/\/app\.floraljet\.llc\/">Log in<\/a>/, "the public site should link to the Rova app login");
+assert.match(homepage, /href="https:\/\/app\.floraljet\.llc\/">Log in<\/a>/, "the public site should link to the Rivo app login");
 assert.match(homepage, /floral-jet\.spennyman\.chatgpt\.site[\s\S]*https:\/\/floraljet\.llc/, "the public shell should replace the old Sites alias before rendering");
 assert.match(homepage, /property="og:image" content="https:\/\/floraljet\.llc\/assets\/rova-app-preview\.jpg"/, "the public site should include the current product in its social preview");
 assert.doesNotMatch(homepage, /FleetJet/i, "the public homepage should not expose the previous company name");
@@ -86,13 +87,13 @@ assert.match(homepage, /single-use link that expires after seven days/i, "the ho
 assert.match(homepage, /Plans start at \$99 CAD per month/, "the homepage should make the pricing starting point visible");
 assert.match(homepage, /Home → Work and Depot → Home/, "the homepage should explain paid home-route support");
 assert.match(homepage, /Proof and exception records[\s\S]*photo or recipient signature/i, "the homepage should describe the released proof workflow");
-assert.match(homepage, /own drivers and third-party couriers/i, "the homepage should position Rova for hybrid local-delivery operations");
+assert.match(homepage, /own drivers and third-party couriers/i, "the homepage should position Rivo for hybrid local-delivery operations");
 assert.match(homepage, /Set up in under 10 minutes[\s\S]*Your drivers \+ courier partners[\s\S]*Plans from \$99 CAD/, "the hero should lead with fast setup, flexible fulfilment, and transparent pricing");
 assert.match(homepage, /own drivers and third-party couriers[\s\S]*request, status, reference number, fee, and tracking link/i, "the homepage should explain the released courier-partner workflow");
 assert.match(homepage, /clearly marked as not sent/i, "courier request copy must distinguish prepared requests from sent messages");
-assert.doesNotMatch(homepage, /Coming next|Rova Driver pilot/, "the primary sales page should not present unreleased roadmap work as current product value");
+assert.doesNotMatch(homepage, /Coming next|Rivo Driver pilot/, "the primary sales page should not present unreleased roadmap work as current product value");
 assert.doesNotMatch(homepage, /Parkside Pharmacy|Bloom Room Florals|Greenlane Express|Northline Courier/i, "the homepage demo should represent one business and its customers");
-assert.match(homepage, /The screenshot is the current Rova product/, "the homepage should show the actual dispatcher, not only a synthetic product mockup");
+assert.match(homepage, /The screenshot is the current Rivo product/, "the homepage should show the actual dispatcher, not only a synthetic product mockup");
 assert.match(homepage, /id="video-demo"/, "the homepage should expose the product-video destination");
 assert.match(homepage, /45-second product walkthrough/, "the homepage should describe the guided product walkthrough clearly");
 assert.match(homepage, /<video[\s\S]*assets\/rova-animated-ad\.mp4/, "the homepage should embed the current animated product ad");
@@ -101,11 +102,11 @@ for (const pathname of ["contact.html", "demo.html", "industries.html", "pricing
   const page = await (await worker.default.fetch(new Request(`https://floraljet.test/${pathname}`), env)).text();
   assert.doesNotMatch(page, /#how-it-works/, `${pathname} should not link to a missing homepage anchor`);
   assert.match(page, /index\.html#platform/, `${pathname} should link to the released platform section`);
-  assert.match(page, /rel="icon" href="assets\/rova-mark\.svg"/, `${pathname} should use the current Rova mark`);
+  assert.match(page, /rel="icon" href="assets\/rova-mark\.svg"/, `${pathname} should use the current Rivo mark`);
 }
 
 const contactPage = await (await worker.default.fetch(new Request("https://floraljet.test/contact.html"), env)).text();
-assert.doesNotMatch(contactPage, /action="mailto:/i, "demo requests should enter the Rova account pipeline");
+assert.doesNotMatch(contactPage, /action="mailto:/i, "demo requests should enter the Rivo account pipeline");
 assert.doesNotMatch(contactPage, /Pay Setup Deposit/i, "public demo requests should not ask for payment before scope is agreed");
 
 const aliasResponse = await worker.default.fetch(new Request("https://floral-jet.spennyman.chatgpt.site/pricing.html?source=old-link"), env);

@@ -146,7 +146,7 @@ function brandBug(context, light = false) {
   context.drawImage(mark, 54, 40, 38, 38);
   context.font = "700 18px 'Avenir Next'";
   context.fillStyle = light ? palette.ink : palette.white;
-  context.fillText("ROVA", 104, 67);
+  context.fillText("RIVO", 104, 67);
   context.font = "700 11px 'Avenir Next'";
   context.fillStyle = light ? "#617089" : "#7990af";
   context.fillText("DELIVERY OPERATIONS", 168, 66);
@@ -317,7 +317,7 @@ function drawMeetScene(context, time) {
   context.save();
   context.globalAlpha *= copyIn;
   context.translate(0, 28 * (1 - copyIn));
-  text(context, "Meet Rova.", 640, 446, 82, palette.white, 800, "center");
+  text(context, "Meet Rivo.", 640, 446, 82, palette.white, 800, "center");
   text(context, "Delivery operations, organized.", 640, 500, 30, palette.slate, 600, "center");
   context.restore();
   context.restore();
@@ -558,10 +558,10 @@ function drawFinalScene(context, time) {
   context.restore();
   const copyIn = easeOut(progress(time, 21.75, 22.45));
   context.globalAlpha *= copyIn;
-  text(context, "Rova", 640, 340, 76, palette.white, 800, "center");
+  text(context, "Rivo", 640, 340, 76, palette.white, 800, "center");
   text(context, "A calmer delivery day starts here.", 640, 402, 34, palette.slate, 600, "center");
   fillRoundRect(context, 430, 454, 420, 78, 23, palette.blue);
-  text(context, "SEE ROVA IN ACTION", 640, 493, 17, palette.white, 800, "center");
+  text(context, "SEE RIVO IN ACTION", 640, 493, 17, palette.white, 800, "center");
   text(context, "floraljet.llc", 640, 570, 26, palette.mint, 800, "center");
   context.restore();
 }
@@ -704,7 +704,7 @@ function drawV2IntakeScene(context, time) {
   brandBug(context, true);
   drawWorkflowRail(context, 0, true);
   text(context, "Orders arrive.", 64, 145, 58, palette.ink, 800);
-  text(context, "Rova organizes.", 64, 204, 58, palette.blue, 800);
+  text(context, "Rivo organizes.", 64, 204, 58, palette.blue, 800);
   text(context, "Bring delivery work into one clean queue.", 66, 250, 23, "#63728a", 600);
 
   const sources = [
@@ -1105,11 +1105,11 @@ function drawV2FinalScene(context, time) {
   context.restore();
   const copyIn = easeOut(progress(time, 22.22, 22.78));
   context.globalAlpha *= copyIn;
-  text(context, "ROVA BY FLORALJET", 640, 230, 13, palette.mint, 800, "center");
+  text(context, "RIVO BY FLORALJET", 640, 230, 13, palette.mint, 800, "center");
   text(context, "Own drivers. Courier partners.", 640, 286, 48, palette.white, 800, "center");
   text(context, "One delivery control room.", 640, 342, 48, palette.sky, 800, "center");
   fillRoundRect(context, 398, 404, 484, 78, 24, palette.blue);
-  text(context, "SEE YOUR DELIVERY DAY IN ROVA", 640, 451, 16, palette.white, 800, "center");
+  text(context, "SEE YOUR DELIVERY DAY IN RIVO", 640, 451, 16, palette.white, 800, "center");
   text(context, "floraljet.llc", 640, 537, 27, palette.mint, 800, "center");
   context.restore();
 }

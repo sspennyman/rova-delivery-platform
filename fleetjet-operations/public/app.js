@@ -823,7 +823,7 @@ function shellHtml(content) {
         <div class="brand">
           <div class="rova-symbol brand-mark" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></div>
           <div class="brand-text">
-            <div class="brand-name">Rova</div>
+            <div class="brand-name">Rivo</div>
             <div class="brand-subtitle">${h(brandSubtitle)}</div>
           </div>
         </div>
@@ -1310,7 +1310,7 @@ function channelsManagementHtml() {
         ${connectionForm("shopify", "Shopify", "Paste the Admin API token from your Shopify store.", `<div class="field full"><label>Store address</label><input class="input" name="storeUrl" placeholder="https://your-store.myshopify.com" required></div><div class="field full"><label>Admin API access token</label><input class="input" name="accessToken" type="password" autocomplete="off" required></div>`)}
         ${connectionForm("woocommerce", "WooCommerce", "Use read-only REST API keys from WooCommerce settings.", `<div class="field full"><label>Store address</label><input class="input" name="storeUrl" type="url" placeholder="https://store.example.com" required></div><div class="field"><label>Consumer key</label><input class="input" name="consumerKey" type="password" autocomplete="off" placeholder="ck_…" required></div><div class="field"><label>Consumer secret</label><input class="input" name="consumerSecret" type="password" autocomplete="off" placeholder="cs_…" required></div>`)}
         ${connectionForm("wix", "Wix", "Connect Wix eCommerce with a site ID and API key.", `<div class="field"><label>Wix site ID</label><input class="input" name="siteId" required></div><div class="field"><label>Wix API key</label><input class="input" name="apiKey" type="password" autocomplete="off" required></div>`)}
-        ${connectionForm("webhook", "Universal webhook", "For Square, Squarespace, BigCommerce, Ecwid, Zapier, Make, or a custom website.", `<div class="field full"><div class="empty">After connecting, Rova gives you a private order URL. Send one order or an <code>orders</code> array as JSON.</div></div>`)}
+        ${connectionForm("webhook", "Universal webhook", "For Square, Squarespace, BigCommerce, Ecwid, Zapier, Make, or a custom website.", `<div class="field full"><div class="empty">After connecting, Rivo gives you a private order URL. Send one order or an <code>orders</code> array as JSON.</div></div>`)}
       </div>
     </section>`;
 }
@@ -1540,7 +1540,7 @@ function courierPartnersWorkspaceHtml() {
       <div class="panel-body">
         <form id="add-courier-form" class="form-grid">
           ${courierPartnerFields()}
-          <div class="field full"><div class="empty compact-empty courier-honesty-note">Rova sends automatically only when a dedicated courier email sender is configured. Otherwise it prepares a request you can open or copy, clearly marked as not sent.</div></div>
+          <div class="field full"><div class="empty compact-empty courier-honesty-note">Rivo sends automatically only when a dedicated courier email sender is configured. Otherwise it prepares a request you can open or copy, clearly marked as not sent.</div></div>
           <div class="field full"><button class="button courier-action" type="submit">Save courier partner</button></div>
         </form>
       </div>
@@ -1578,7 +1578,7 @@ function courierRequestModalHtml() {
   return `
     <div class="modal-backdrop" role="presentation" data-modal-backdrop>
       <section class="modal-sheet courier-request-modal" role="dialog" aria-modal="true" aria-labelledby="courier-request-title" data-modal-panel>
-        <div class="modal-header"><div><p class="eyebrow">External delivery</p><h2 id="courier-request-title">Request a courier for ${trips.length} order${trips.length === 1 ? "" : "s"}</h2><p>Rova records the handoff without pretending the courier has Rova driver GPS.</p></div><button class="icon-button" data-action="close-courier-request" type="button" aria-label="Close courier request">×</button></div>
+        <div class="modal-header"><div><p class="eyebrow">External delivery</p><h2 id="courier-request-title">Request a courier for ${trips.length} order${trips.length === 1 ? "" : "s"}</h2><p>Rivo records the handoff without pretending the courier has Rivo driver GPS.</p></div><button class="icon-button" data-action="close-courier-request" type="button" aria-label="Close courier request">×</button></div>
         <div class="courier-request-summary">
           <div><span>Pickup</span><strong>${h(pickupCount === 1 ? trips[0].pickup : `${pickupCount} different pickup addresses`)}</strong></div>
           <div><span>Deliveries</span><strong>${trips.length}</strong></div>
@@ -1591,7 +1591,7 @@ function courierRequestModalHtml() {
             <div class="field"><label for="request-service">Service level</label><select class="select" id="request-service" name="serviceLevel"><option>Same-day</option><option>On-demand</option><option>Scheduled</option><option>Priority</option></select></div>
             <div class="field"><label for="request-fee">Expected or quoted fee</label><input class="input" id="request-fee" name="quotedFee" type="number" min="0" step="0.01" placeholder="Optional"></div>
             <div class="field full"><label for="request-notes">Notes safe to send to the courier</label><textarea class="textarea" id="request-notes" name="notes" placeholder="Pickup contact, delivery window, handling instructions"></textarea></div>
-            <div class="field full courier-send-disclosure">The saved partner method determines whether Rova emails automatically, opens a booking page, or creates a request to share manually. The result will say clearly whether anything was sent.</div>
+            <div class="field full courier-send-disclosure">The saved partner method determines whether Rivo emails automatically, opens a booking page, or creates a request to share manually. The result will say clearly whether anything was sent.</div>
             <div class="modal-actions simple"><span></span><button class="button secondary" data-action="close-courier-request" type="button">Cancel</button><button class="button courier-action" type="submit" ${pickupCount === 1 ? "" : "disabled"}>Create courier request</button></div>
           </form>` : `
           <div class="modal-form"><div class="empty">Add a courier partner before requesting outside coverage.</div><div class="modal-actions simple"><span></span><button class="button secondary" data-action="close-courier-request" type="button">Cancel</button><button class="button courier-action" data-action="go-to-couriers" type="button">Add courier partner</button></div></div>`}
@@ -1749,14 +1749,14 @@ function tripLogCards(trips, options = {}) {
 }
 
 function renderLogin() {
-  const companyName = state.company?.name || state.snapshot?.company?.name || "Rova";
+  const companyName = state.company?.name || state.snapshot?.company?.name || "Rivo";
   app.innerHTML = `
     <div class="public-shell">
       <header class="public-nav">
         <div class="brand">
           <div class="rova-symbol public-brand-mark" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></div>
           <div class="brand-text">
-            <div class="brand-name">Rova</div>
+            <div class="brand-name">Rivo</div>
             <div class="brand-subtitle">Operations platform</div>
           </div>
         </div>
@@ -1764,9 +1764,9 @@ function renderLogin() {
       </header>
 
       <main class="public-main app-login-main">
-        <section class="app-gateway" aria-label="Rova app login">
+        <section class="app-gateway" aria-label="Rivo app login">
           <div class="app-gateway-copy">
-            <p class="public-badge">Rova app</p>
+            <p class="public-badge">Rivo app</p>
             <h1 class="app-gateway-title">Run the delivery day without the chaos.</h1>
             <p class="app-gateway-subtitle">Bring orders into one queue, plan the routes, dispatch your own drivers, and keep every customer update and proof record attached to the work.</p>
             <div class="app-gateway-status" aria-label="Application status">
@@ -1805,7 +1805,7 @@ function renderLogin() {
                   </div>
                 </form>
                 <details class="login-support"><summary>Driver sign-in help</summary><div><strong>First time here?</strong> Open the latest invitation from your dispatcher and create your password. Returning drivers sign in with their email. If your link expired or you forgot your password, ask dispatch to send a new secure link.</div></details>
-                <div class="login-help"><strong>New to Rova?</strong> <a href="https://floraljet.llc/contact.html">Book a guided walkthrough</a>.</div>
+                <div class="login-help"><strong>New to Rivo?</strong> <a href="https://floraljet.llc/contact.html">Book a guided walkthrough</a>.</div>
                 ${!state.ownerCreated && state.setupEnabled ? `
                   <div class="item-actions" style="margin-top:14px">
                     <button class="button secondary" data-action="show-setup" type="button">Create owner account</button>
@@ -1836,8 +1836,8 @@ function renderDriverInvite() {
   app.innerHTML = `
     <div class="invite-shell">
       <aside class="invite-story">
-        <a class="invite-brand" href="https://floraljet.llc/" aria-label="Rova website">
-          <span class="rova-symbol" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></span><strong>Rova</strong>
+        <a class="invite-brand" href="https://floraljet.llc/" aria-label="Rivo website">
+          <span class="rova-symbol" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></span><strong>Rivo</strong>
         </a>
         <div>
           <p class="public-badge">Driver access</p>
@@ -1854,7 +1854,7 @@ function renderDriverInvite() {
         <section class="invite-card" aria-live="polite">
           <div class="invite-step">Account setup · 1 minute</div>
           <h2>${profile ? `Welcome, ${h(profile.name)}` : state.inviteError ? "Invitation unavailable" : "Checking invitation…"}</h2>
-          <p class="invite-card-copy">${profile ? `Create the password for <strong>${h(profile.email)}</strong>. This email becomes your Rova sign-in.` : state.inviteError ? "This link cannot be used. It may have expired or already been replaced." : "Please wait while Rova verifies your secure link."}</p>
+          <p class="invite-card-copy">${profile ? `Create the password for <strong>${h(profile.email)}</strong>. This email becomes your Rivo sign-in.` : state.inviteError ? "This link cannot be used. It may have expired or already been replaced." : "Please wait while Rivo verifies your secure link."}</p>
           ${state.inviteError ? `
             <div class="inline-alert error"><strong>We couldn’t open this invitation.</strong><span>${h(state.inviteError)}</span></div>
             <div class="invite-actions"><button class="button" data-action="show-login" type="button">Go to sign in</button><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Driver%20invitation%20help">Get help</a></div>` : ""}
@@ -1879,7 +1879,7 @@ function renderDriverInvite() {
 }
 
 function renderOwnerSetup() {
-  const companyName = state.company?.name || "Rova";
+  const companyName = state.company?.name || "Rivo";
   app.innerHTML = `
     <div class="main">
       <section class="panel" style="max-width:520px;margin:7vh auto 0">
@@ -2137,13 +2137,13 @@ function renderSettingsHtml() {
 
         <div class="settings-stack">
           <div class="panel">
-            <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(planAccess.name || company.plan || "Starter")}</h3><p class="panel-subtitle">${planAccess.monthlyPrice ? `$${h(planAccess.monthlyPrice)}/month · ` : ""}Dedicated Rova workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
-            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">Plan changes are reviewed before billing. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rova%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rova%20billing">Billing support</a></div></div>
+            <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(planAccess.name || company.plan || "Starter")}</h3><p class="panel-subtitle">${planAccess.monthlyPrice ? `$${h(planAccess.monthlyPrice)}/month · ` : ""}Dedicated Rivo workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
+            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">Plan changes are reviewed before billing. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rivo%20billing">Billing support</a></div></div>
           </div>
-          <div class="panel network-readiness-card"><div class="panel-header"><div><p class="eyebrow">Future network</p><h3 class="panel-title">My Drivers + Rova Driver</h3><p class="panel-subtitle">The fulfillment model is ready for external network drivers without pretending a marketplace exists today.</p></div><span class="status assigned">Coming later</span></div><div class="panel-body"><div class="fulfillment-choice-preview"><div class="active"><strong>My Drivers</strong><span>Your employed or contracted fleet.</span></div><div><strong>Rova Driver</strong><span>Quote, accept, track, and platform-fee workflow prepared for a future network.</span></div></div><p class="settings-copy">Until the Rova network launches, use saved courier partners for third-party coverage.</p><button class="button secondary" data-action="dispatcher-view" data-view="drivers" type="button">Manage courier partners</button></div></div>
+          <div class="panel network-readiness-card"><div class="panel-header"><div><p class="eyebrow">Future network</p><h3 class="panel-title">My Drivers + Rivo Driver</h3><p class="panel-subtitle">The fulfillment model is ready for external network drivers without pretending a marketplace exists today.</p></div><span class="status assigned">Coming later</span></div><div class="panel-body"><div class="fulfillment-choice-preview"><div class="active"><strong>My Drivers</strong><span>Your employed or contracted fleet.</span></div><div><strong>Rivo Driver</strong><span>Quote, accept, track, and platform-fee workflow prepared for a future network.</span></div></div><p class="settings-copy">Until the Rivo network launches, use saved courier partners for third-party coverage.</p><button class="button secondary" data-action="dispatcher-view" data-view="drivers" type="button">Manage courier partners</button></div></div>
           <div class="panel">
             <div class="panel-header"><div><h3 class="panel-title">Support</h3><p class="panel-subtitle">Get help with onboarding, integrations, or live operations.</p></div></div>
-            <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "hello@floraljet.llc")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "hello@floraljet.llc")}?subject=Rova%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button></div></div>
+            <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "hello@floraljet.llc")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "hello@floraljet.llc")}?subject=Rivo%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button></div></div>
           </div>
         </div>
       </div>
@@ -2166,7 +2166,7 @@ function renderAnalyticsHtml() {
   const costValue = analytics.averageCostPerDelivery === null || analytics.averageCostPerDelivery === undefined ? "—" : formatMoney(analytics.averageCostPerDelivery);
   return `
     <section class="dispatch-view${state.dispatcherView === "analytics" ? " active" : ""} dashboard-section view-section analytics-view" id="analytics">
-      <div class="analytics-source-note"><span class="pulse"></span><div><strong>Live operations data</strong><small>All completed Rova delivery records in this workspace. Metrics refresh with the dispatch board.</small></div></div>
+      <div class="analytics-source-note"><span class="pulse"></span><div><strong>Live operations data</strong><small>All completed Rivo delivery records in this workspace. Metrics refresh with the dispatch board.</small></div></div>
       <div class="analytics-metric-grid">
         ${analyticsMetricCard("Completed deliveries", analytics.completed || 0, "Completed, delivered, submitted, or approved")}
         ${analyticsMetricCard("On-time delivery", onTimeValue, "Only deliveries with a configured delivery window", Number(analytics.onTimeRate || 100) < 90 ? "warn" : "good")}
@@ -2187,7 +2187,7 @@ function renderAnalyticsHtml() {
           </div>
         </div>
         <div class="panel analytics-definition-panel">
-          <div class="panel-header"><div><p class="eyebrow">Metric quality</p><h2 class="panel-title">What Rova can measure</h2><p class="panel-subtitle">Unknown data stays unknown instead of being estimated.</p></div></div>
+          <div class="panel-header"><div><p class="eyebrow">Metric quality</p><h2 class="panel-title">What Rivo can measure</h2><p class="panel-subtitle">Unknown data stays unknown instead of being estimated.</p></div></div>
           <div class="panel-body"><div class="accounts-checklist">
             <div><strong>On-time rate</strong><span>Requires a delivery-window end and a completion timestamp.</span></div>
             <div><strong>Cost per delivery</strong><span>Uses recorded distance and the assigned kilometre rate. Fuel, wages, and courier fees are excluded unless captured.</span></div>
@@ -2210,7 +2210,7 @@ function dispatchAssistantPanelHtml() {
         <div>
           <p class="eyebrow">Smart dispatch</p>
           <h2>${alerts.length ? `${alerts.length} issue${alerts.length === 1 ? "" : "s"} need attention` : queued.length ? `${queued.length} deliver${queued.length === 1 ? "y is" : "ies are"} ready to plan` : "Routes are under control"}</h2>
-          <p>Rova considers priority, delivery windows, driver availability, current workload, and vehicle capacity—and explains every recommendation.</p>
+          <p>Rivo considers priority, delivery windows, driver availability, current workload, and vehicle capacity—and explains every recommendation.</p>
         </div>
         <button class="button assistant-button" data-action="optimize-deliveries" type="button" ${!queued.length || state.optimizerLoading ? "disabled" : ""}>${state.optimizerLoading ? "Planning…" : "Optimize deliveries"}</button>
       </div>
@@ -2331,7 +2331,7 @@ function renderDispatcher() {
   const submitted = weekly.filter((trip) => trip.status === "submitted");
   const view = state.dispatcherView;
   const companyName = state.snapshot?.company?.name || "Delivery operations";
-  const workspaceEyebrow = companyName.toLowerCase() === "rova" ? "Rova workspace" : `Rova · ${companyName}`;
+  const workspaceEyebrow = companyName.toLowerCase() === "rivo" ? "Rivo workspace" : `Rivo · ${companyName}`;
   const viewTitle = view === "drivers" ? "Delivery team" : view === "analytics" ? "Operations analytics" : view === "channels" ? "Connections" : view === "accounts" ? "Accounts" : view === "reports" ? "Reports" : view === "settings" ? "Settings" : "Today";
   const viewSubtitle = view === "drivers"
     ? "Manage in-house drivers and the courier partners you use for outside coverage."
@@ -2804,7 +2804,7 @@ function renderDriver() {
           <div class="driver-profile-row"><span>Vehicle</span><strong>${h(driver.vehicle)}</strong></div>
           <div class="driver-profile-row"><span>Shift</span><strong>${h(driver.shift || "Not set")}</strong></div>
           <div class="driver-profile-row"><span>Phone</span><strong>${h(driver.phone || "Not set")}</strong></div>
-          <div class="privacy-note"><span class="privacy-dot"></span><span>Rova shares your live location only while you have location sharing turned on for an active trip.</span></div>
+          <div class="privacy-note"><span class="privacy-dot"></span><span>Rivo shares your live location only while you have location sharing turned on for an active trip.</span></div>
           <div class="driver-action-stack">
             ${isStandalone() ? "" : `<button class="button secondary" data-action="install-app" type="button">Install driver app</button>`}
             <button class="button secondary" data-action="logout">Log out</button>
@@ -2835,7 +2835,7 @@ function renderCustomer() {
   const trip = state.customerTrip;
   const companyName = state.company?.name || "Delivery Tracker";
   const branding = state.company?.branding || {};
-  const brandLogo = branding.logoUrl || "/assets/rova-logo.png";
+  const brandLogo = branding.logoUrl || "/assets/rivo-logo.png";
   const brandColor = /^#[0-9a-f]{6}$/i.test(branding.primaryColor || "") ? branding.primaryColor : "#176b52";
   if (!state.route.token) {
     app.innerHTML = `
@@ -3862,7 +3862,7 @@ async function connectChannel(form) {
 }
 
 async function disconnectChannel(connectionId, connectionName) {
-  if (!window.confirm(`Disconnect ${connectionName || "this sales channel"}? Imported orders will stay in Rova.`)) return;
+  if (!window.confirm(`Disconnect ${connectionName || "this sales channel"}? Imported orders will stay in Rivo.`)) return;
   const response = await api(`/api/integrations/${encodeURIComponent(connectionId)}`, { method: "DELETE" });
   if (response.snapshot) state.snapshot = response.snapshot;
   toast("Sales channel disconnected");
@@ -4181,7 +4181,7 @@ async function updateCourierPartner(form) {
 }
 
 async function archiveCourierPartner(courierPartnerId, courierName) {
-  if (!window.confirm(`Archive ${courierName || "this courier partner"}? Historical requests will stay in Rova.`)) return;
+  if (!window.confirm(`Archive ${courierName || "this courier partner"}? Historical requests will stay in Rivo.`)) return;
   const response = await api(`/api/couriers/${encodeURIComponent(courierPartnerId)}`, { method: "DELETE" });
   if (response.snapshot) state.snapshot = response.snapshot;
   state.editingCourierId = "";
@@ -4415,7 +4415,7 @@ app.addEventListener("click", async (event) => {
       return;
     }
     if (action === "share-driver-link") {
-      await shareLink(target.dataset.shareUrl || "", "Join Rova as a driver");
+      await shareLink(target.dataset.shareUrl || "", "Join Rivo as a driver");
       return;
     }
     if (action === "edit-driver") {
@@ -4984,7 +4984,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=39").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=40").catch(() => {});
   });
 }
 

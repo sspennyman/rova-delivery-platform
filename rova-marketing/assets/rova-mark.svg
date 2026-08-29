@@ -1,13 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
-  <title id="title">Rova route mark</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Rivo folded route mark</title>
+  <desc id="desc">A blue and cyan folded ribbon forming the letter R.</desc>
   <defs>
-    <linearGradient id="route" x1="10" y1="39" x2="38" y2="9" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#70E0B4"/>
-      <stop offset="1" stop-color="#7D9BFF"/>
+    <linearGradient id="rivo-upper" x1="10" y1="12" x2="54" y2="42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#174CF6"/><stop offset="0.56" stop-color="#078DF4"/><stop offset="1" stop-color="#04DDE3"/>
+    </linearGradient>
+    <linearGradient id="rivo-lower" x1="16" y1="34" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1553F4"/><stop offset="0.52" stop-color="#0798F0"/><stop offset="1" stop-color="#08E6DA"/>
     </linearGradient>
   </defs>
-  <rect width="48" height="48" rx="14" fill="#111A31"/>
-  <path d="M12 35c0-8.4 12-6.8 12-15.1C24 13.3 28.4 11 36 11" fill="none" stroke="url(#route)" stroke-width="4.5" stroke-linecap="round"/>
-  <circle cx="12" cy="35" r="4" fill="#70E0B4" stroke="#fff" stroke-width="2"/>
-  <circle cx="36" cy="11" r="4" fill="#7D9BFF" stroke="#fff" stroke-width="2"/>
+  <path fill="url(#rivo-upper)" d="M8.8 10h34.6C52 10 57 15.3 57 23.8v5.8C57 39 50.7 45 41.4 45H29.8l-7.3-9.2h18.7c4.4 0 6.7-2.3 6.7-6.5v-4.8c0-3.8-2.3-5.8-6.4-5.8H17.2c-2.4 0-4.3-.8-5.8-2.4L7.3 12c-1.1-1.2-.6-2 1.5-2Z"/>
+  <path fill="url(#rivo-lower)" d="M14.5 34.3c3.7-4.6 11.3-5.7 16.3-.7L53.3 56c1 1 .6 2-1 2H41c-1.4 0-2.4-.5-3.3-1.5L24.3 41.8c-2.2-2.4-5.1-2.8-8.2-1.2l-7.3 3.8c-1.4.7-2.2-.2-1.2-1.5l6.9-8.6Z"/>
+  <path fill="#1450F4" d="M7.6 42.9l6.9-8.6c2.2-2.8 5.8-4.5 9.5-4.4-2.3 1.2-2.6 4.2-.5 6.1l2.9 2.8c-3-1.1-6.4-.6-10.3 1.8l-7.3 3.8c-1.4.7-2.2-.2-1.2-1.5l6.9-8.6Z" opacity=".92"/>
 </svg>

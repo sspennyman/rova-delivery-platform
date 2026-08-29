@@ -1,6 +1,6 @@
-# Rova Operations
+# Rivo Operations
 
-Rova is a delivery command center for dispatchers, drivers, and customers. It imports orders from connected storefronts, builds multi-stop routes, tracks active deliveries, and records paid business travel including home-to-work and return-home legs.
+Rivo is a delivery command center for dispatchers, drivers, and customers. It imports orders from connected storefronts, builds multi-stop routes, tracks active deliveries, and records paid business travel including home-to-work and return-home legs.
 
 ## Run locally
 
@@ -20,7 +20,7 @@ Fresh installations have no demo credentials. Set a unique `OWNER_SETUP_CODE`, v
 
 ## Driver invitations and sign-in
 
-Dispatchers invite a driver from **Drivers** by entering the driver's email address and profile details. Rova creates a single-use invitation that opens the account-creation screen at `/operations?invite=...`. The driver sets a password once, then signs in with that email address afterward.
+Dispatchers invite a driver from **Drivers** by entering the driver's email address and profile details. Rivo creates a single-use invitation that opens the account-creation screen at `/operations?invite=...`. The driver sets a password once, then signs in with that email address afterward.
 
 Invitation links expire. A dispatcher can issue a fresh password-reset invitation from the driver's profile when needed. The roster shows whether an invitation is pending, accepted, expired, or needs attention.
 
@@ -28,10 +28,10 @@ To send invitation emails automatically, configure both:
 
 ```env
 RESEND_API_KEY=re_...
-INVITE_FROM_EMAIL=Rova <drivers@your-verified-domain.com>
+INVITE_FROM_EMAIL=Rivo <drivers@your-verified-domain.com>
 ```
 
-The sender domain must be verified with Resend. If email is not configured or delivery fails, the driver is still created and Rova presents persistent **Share**, **Copy link**, and **Open test** controls so the dispatcher can send the invitation manually without losing it.
+The sender domain must be verified with Resend. If email is not configured or delivery fails, the driver is still created and Rivo presents persistent **Share**, **Copy link**, and **Open test** controls so the dispatcher can send the invitation manually without losing it.
 
 Passwords are stored as salted PBKDF2-SHA256 hashes. Login endpoints are rate-limited and authentication responses are marked `no-store`.
 
@@ -48,7 +48,7 @@ Every recorded trip is business mileage. Deliveries, pickups, paid home-origin t
 
 ## Driver mobile app
 
-Rova is an installable progressive web app. A driver opens the invitation on a phone, creates the account, signs in, and can add the app to the home screen.
+Rivo is an installable progressive web app. A driver opens the invitation on a phone, creates the account, signs in, and can add the app to the home screen.
 
 The driver view includes assigned routes, next-stop navigation, device GPS publishing, customer tracking links, completion outcomes and notes, and weekly business-kilometre submission. Drivers only receive trips assigned to their own account. Location access requires HTTPS outside local development.
 
@@ -69,7 +69,7 @@ Connected channels normalize incoming orders into one dispatch queue and de-dupl
 
 Set `GOOGLE_MAPS_BROWSER_API_KEY` to a browser-referrer-restricted key for the embedded map, and `GOOGLE_MAPS_SERVER_API_KEY` to a Routes API-restricted server key for stop optimization. `GOOGLE_MAPS_MAP_ID` is optional. Existing workspaces can continue using `GOOGLE_MAPS_API_KEY` as a legacy fallback while the two keys are separated.
 
-Without a usable Google Maps key, Rova automatically shows its OpenFreeMap-based GPS view and keeps external Google Maps navigation links available.
+Without a usable Google Maps key, Rivo automatically shows its OpenFreeMap-based GPS view and keeps external Google Maps navigation links available.
 
 ## Verify the production bundle
 

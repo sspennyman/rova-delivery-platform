@@ -13,6 +13,7 @@ const requiredFiles = [
   "dist/client/manifest.webmanifest",
   "dist/client/assets/rova-logo.png",
   "dist/client/assets/rova-mark.svg",
+  "dist/client/assets/rivo-logo.png",
   "dist/.openai/hosting.json",
   "dist/.openai/drizzle/0001_rova_normalized_projection.sql"
 ];
@@ -26,11 +27,11 @@ for (const relativePath of requiredFiles) {
 
 const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8");
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
-assert.match(appHtml, /id="app"/, "the public root should load the Rova application shell");
+assert.match(appHtml, /id="app"/, "the public root should load the Rivo application shell");
 assert.match(appHtml, /delivery-driver-tracker\.spennyman\.chatgpt\.site[\s\S]*app\.floraljet\.llc/, "the app shell should replace the old alias before rendering");
-assert.match(appHtml, /app\.js\?v=39/, "the public root should load the latest Rova app bundle");
+assert.match(appHtml, /app\.js\?v=40/, "the public root should load the latest Rivo app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
-assert.match(operationsHtml, /app\.js\?v=39/, "the dispatcher route should load the latest Rova app bundle");
+assert.match(operationsHtml, /app\.js\?v=40/, "the dispatcher route should load the latest Rivo app bundle");
 
 const hosting = JSON.parse(fs.readFileSync(path.join(root, "dist/.openai/hosting.json"), "utf8"));
 if (!hosting.project_id) {
@@ -39,8 +40,8 @@ if (!hosting.project_id) {
 
 const appSource = fs.readFileSync(path.join(root, "dist/client/app.js"), "utf8");
 const stylesSource = fs.readFileSync(path.join(root, "dist/client/styles.css"), "utf8");
-assert.match(appSource, /Run the delivery day without the chaos/, "the app subdomain should render the Rova login portal");
-assert.match(appSource, /Rova app/, "the app portal should use the Rova company name");
+assert.match(appSource, /Run the delivery day without the chaos/, "the app subdomain should render the Rivo login portal");
+assert.match(appSource, /Rivo app/, "the app portal should use the Rivo company name");
 assert.match(appSource, /Business profile/, "dispatcher workspaces should include operational settings");
 assert.match(appSource, /Nothing on this page creates a charge/, "plan settings must not create accidental charges");
 assert.match(appSource, /Balance orders/, "dispatcher workspaces should expose workload balancing without overstating AI");
@@ -175,7 +176,7 @@ const assetRequests = [];
 const env = {
   DB: database,
   PROOF_MEDIA: proofMedia,
-  COMPANY_NAME: "Rova",
+  COMPANY_NAME: "Rivo",
   OWNER_SETUP_CODE: "validation-setup-code",
   ASSETS: {
     fetch: async (request) => {
@@ -191,8 +192,8 @@ const setupRequest = new Request("https://vms.test/api/auth/setup", {
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
     setupCode: "validation-setup-code",
-    companyName: "Rova",
-    name: "Rova Owner",
+    companyName: "Rivo",
+    name: "Rivo Owner",
     username: "fleetjetowner",
     password: "validation-password"
   })
@@ -202,7 +203,7 @@ const setupResponse = await initialWorker.default.fetch(setupRequest, env);
 assert.equal(setupResponse.status, 201, "owner setup should save to the attached database");
 assert.equal(setupResponse.headers.get("cache-control"), "no-store", "authentication responses must not be cached");
 const setupPayload = await setupResponse.json();
-assert.ok(database.row?.payload_json, "attached database should contain the saved Rova state");
+assert.ok(database.row?.payload_json, "attached database should contain the saved Rivo state");
 assert.equal(setupPayload.snapshot.drivers.length, 0, "a fresh production workspace should not seed demo drivers");
 assert.equal(setupPayload.snapshot.courierPartners.length, 0, "a fresh production workspace should not seed courier partners");
 assert.equal(setupPayload.snapshot.courierRequests.length, 0, "a fresh production workspace should not seed courier requests");
@@ -217,7 +218,7 @@ assert.equal(setupPayload.snapshot.courierEmail.configured, false, "courier emai
 assert.equal(setupPayload.snapshot.proofMedia.configured, true, "the UI should expose attached proof storage");
 assert.equal(setupPayload.snapshot.planAccess.monthlyPrice, 99, "new workspaces should expose Starter pricing without charging the account");
 assert.equal(setupPayload.snapshot.dispatchAssistant.aiConnected, false, "the rules engine must not be presented as connected generative AI");
-assert.equal(setupPayload.snapshot.analytics.dataSource, "Rova delivery records", "analytics should describe its source");
+assert.equal(setupPayload.snapshot.analytics.dataSource, "Rivo delivery records", "analytics should describe its source");
 
 const reloadedWorker = await loadFreshWorker("reload");
 const persistedResponse = await reloadedWorker.default.fetch(
@@ -228,15 +229,15 @@ const persistedResponse = await reloadedWorker.default.fetch(
 );
 assert.equal(persistedResponse.status, 200, "saved owner session should work after a worker reload");
 const persistedPayload = await persistedResponse.json();
-assert.equal(persistedPayload.session.name, "Rova Owner");
-assert.equal(persistedPayload.snapshot.company.name, "Rova");
+assert.equal(persistedPayload.session.name, "Rivo Owner");
+assert.equal(persistedPayload.snapshot.company.name, "Rivo");
 
 const rootPageResponse = await reloadedWorker.default.fetch(new Request("https://vms.test/"), env);
 assert.equal(rootPageResponse.status, 200, "the public root should load");
 assert.equal(assetRequests.at(-1), "/index.html", "the public root should serve the public app shell");
 const faviconResponse = await reloadedWorker.default.fetch(new Request("https://vms.test/favicon.ico"), env);
 assert.equal(faviconResponse.status, 200, "the browser favicon request should resolve");
-assert.equal(assetRequests.at(-1), "/assets/rova-logo.png");
+assert.equal(assetRequests.at(-1), "/assets/rova-mark.svg");
 const stalePageResponse = await reloadedWorker.default.fetch(new Request("https://vms.test/pricing.html"), env);
 assert.equal(stalePageResponse.status, 200, "stale marketing routes should keep loading");
 assert.equal(assetRequests.at(-1), "/operations.html", "stale marketing routes should no longer expose old static pages");
@@ -265,7 +266,7 @@ assert.equal(
 
 const healthResponse = await reloadedWorker.default.fetch(new Request("https://vms.test/api/health"), env);
 assert.equal(healthResponse.status, 200, "the production health endpoint should respond");
-assert.equal((await healthResponse.json()).service, "Rova");
+assert.equal((await healthResponse.json()).service, "Rivo");
 
 const leadPreflightResponse = await reloadedWorker.default.fetch(
   new Request("https://vms.test/api/leads", {
@@ -277,7 +278,7 @@ const leadPreflightResponse = await reloadedWorker.default.fetch(
   }),
   env
 );
-assert.equal(leadPreflightResponse.status, 204, "the public Rova site should be allowed to submit leads");
+assert.equal(leadPreflightResponse.status, 204, "the public Rivo site should be allowed to submit leads");
 assert.equal(leadPreflightResponse.headers.get("access-control-allow-origin"), "https://floraljet.llc");
 
 const invalidLeadResponse = await reloadedWorker.default.fetch(
@@ -312,7 +313,7 @@ const leadCreateResponse = await reloadedWorker.default.fetch(
   }),
   env
 );
-assert.equal(leadCreateResponse.status, 201, "public visitors should be able to request a Rova pilot");
+assert.equal(leadCreateResponse.status, 201, "public visitors should be able to request a Rivo pilot");
 assert.equal(leadCreateResponse.headers.get("access-control-allow-origin"), "https://floraljet.llc");
 const leadCreatePayload = await leadCreateResponse.json();
 assert.match(leadCreatePayload.lead.id, /^lead_/, "pilot requests should receive a lead id");
@@ -612,7 +613,7 @@ assert.equal(assetRequests.at(-1), "/operations.html", "the driver invitation ro
 const originalEmailFetch = globalThis.fetch;
 let emailedInvitePayload;
 env.RESEND_API_KEY = "validation-resend-key";
-env.INVITE_FROM_EMAIL = "Rova Drivers <drivers@floraljet.llc>";
+env.INVITE_FROM_EMAIL = "Rivo Drivers <drivers@floraljet.llc>";
 try {
   globalThis.fetch = async (input, init = {}) => {
     assert.equal(String(input), "https://api.resend.com/emails", "configured driver invitations should use the email provider");
@@ -1361,7 +1362,7 @@ const webhookOrderResponse = await reloadedWorker.default.fetch(
   }),
   env
 );
-assert.equal(webhookOrderResponse.status, 202, "connected websites should be able to send paid orders to Rova");
+assert.equal(webhookOrderResponse.status, 202, "connected websites should be able to send paid orders to Rivo");
 const webhookOrderPayload = await webhookOrderResponse.json();
 assert.equal(webhookOrderPayload.sync.imported, 1);
 

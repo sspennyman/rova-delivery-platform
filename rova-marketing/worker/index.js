@@ -33,7 +33,7 @@ function extension(pathname) {
 
 function normalizePath(pathname) {
   if (pathname === "/" || pathname === "") return "/index.html";
-  if (pathname === "/favicon.ico") return "/assets/rova-logo.png";
+  if (pathname === "/favicon.ico") return "/assets/rova-mark.svg";
   if (pathname.includes("..")) return null;
   if (!hasExtension(pathname)) return `${pathname.replace(/\/$/, "")}.html`;
   return pathname;

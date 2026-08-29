@@ -182,5 +182,5 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Rova running at http://${HOST}:${PORT}`);
+  console.log(`Rivo running at http://${HOST}:${PORT}`);
 });

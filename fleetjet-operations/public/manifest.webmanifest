@@ -1,6 +1,6 @@
 {
-  "name": "Rova Operations",
-  "short_name": "Rova",
+  "name": "Rivo Operations",
+  "short_name": "Rivo",
   "description": "AI operations platform for local delivery businesses.",
   "start_url": "/dispatcher",
   "scope": "/",
@@ -11,7 +11,7 @@
   "categories": ["business", "productivity", "navigation"],
   "icons": [
     {
-      "src": "/assets/rova-logo.png",
+      "src": "/assets/rivo-logo.png",
       "sizes": "1536x1024",
       "type": "image/png",
       "purpose": "any"

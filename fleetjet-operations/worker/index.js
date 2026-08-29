@@ -1,5 +1,5 @@
 const clients = new Set();
-const DEFAULT_COMPANY_NAME = "Rova";
+const DEFAULT_COMPANY_NAME = "Rivo";
 const DEFAULT_PICKUP_ADDRESS = "1675 Cyrville Rd";
 const WIX_PICKUP_NAME = "Cyrville";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
@@ -232,8 +232,8 @@ async function sendDriverInvite(env, driver, inviteUrl) {
     body: JSON.stringify({
       from,
       to: [driver.email],
-      subject: "You’re invited to Rova",
-      text: `Hi ${driver.name},\n\nYou’ve been invited to join Rova as a driver. Create your password and sign in here:\n${inviteUrl}\n\nThis link expires in 7 days.`
+      subject: "You’re invited to Rivo",
+      text: `Hi ${driver.name},\n\nYou’ve been invited to join Rivo as a driver. Create your password and sign in here:\n${inviteUrl}\n\nThis link expires in 7 days.`
     })
   });
   if (!response.ok) {
@@ -1042,7 +1042,7 @@ async function writeDb(db, env = {}) {
   }
   db.__persistedUpdatedAt = nextVersion;
   await syncNormalizedProjection(db, env).catch((error) => {
-    console.error("Normalized Rova projection could not be refreshed", error);
+    console.error("Normalized Rivo projection could not be refreshed", error);
   });
 }
 
@@ -1538,7 +1538,7 @@ function operationsAnalytics(db) {
     active: trips.filter((trip) => trip.driverId === driver.id && trip.status === "active").length
   }));
   return {
-    dataSource: "Rova delivery records",
+    dataSource: "Rivo delivery records",
     scope: "All non-archived deliveries in this workspace",
     caveat: "Time and on-time metrics appear only when the required timestamps or delivery windows exist.",
     completed: completed.length,
@@ -1583,7 +1583,7 @@ function snapshot(db, env) {
       mode: "explainable-rules",
       aiConnected: false,
       label: "Explainable dispatch recommendations",
-      note: "Rova uses current workload, driver availability, route order, delivery priority, and time windows. No generative AI provider is connected."
+      note: "Rivo uses current workload, driver availability, route order, delivery priority, and time windows. No generative AI provider is connected."
     },
     weekKey: weekKey(),
     integrations: integrationsStatus(db, env),
@@ -1803,7 +1803,7 @@ async function buildOptimizationPlan(db, env, requestedIds = null) {
     canEstimateRoute: recommendations.some((item) => item.estimatedDurationMinutes !== null),
     totalDeliveries: trips.length,
     recommendations,
-    explanation: "Priority orders and earliest delivery windows are considered first. Rova then balances active workload and driver capacity before ordering each route."
+    explanation: "Priority orders and earliest delivery windows are considered first. Rivo then balances active workload and driver capacity before ordering each route."
   };
 }
 
@@ -2570,7 +2570,7 @@ async function handleApi(request, env, url) {
   const session = sessionFromRequest(request, db, url);
 
   if (method === "GET" && url.pathname === "/api/health") {
-    return sendJson({ ok: true, service: "Rova", time: nowIso() });
+    return sendJson({ ok: true, service: "Rivo", time: nowIso() });
   }
 
   const proofMediaReadMatch = url.pathname.match(/^\/api\/proof-media\/([^/]+)$/);
@@ -2641,7 +2641,7 @@ async function handleApi(request, env, url) {
       return leadJson(request, {
         ok: true,
         lead: publicLead(recentDuplicate),
-        message: "Thanks. Your Rova demo request is already in the queue."
+        message: "Thanks. Your Rivo demo request is already in the queue."
       }, 202);
     }
     const lead = {
@@ -2667,7 +2667,7 @@ async function handleApi(request, env, url) {
     return leadJson(request, {
       ok: true,
       lead: publicLead(lead),
-      message: "Thanks. Your Rova demo request is in the queue."
+      message: "Thanks. Your Rivo demo request is in the queue."
     }, 201);
   }
 
@@ -3560,7 +3560,7 @@ async function handleApi(request, env, url) {
     try {
       return sendJson({ plan: await buildOptimizationPlan(db, env, requestedIds) });
     } catch (error) {
-      return badRequest(error.message || "Rova could not prepare an optimization plan.");
+      return badRequest(error.message || "Rivo could not prepare an optimization plan.");
     }
   }
 
@@ -3572,7 +3572,7 @@ async function handleApi(request, env, url) {
     try {
       plan = await buildOptimizationPlan(db, env, requestedIds);
     } catch (error) {
-      return badRequest(error.message || "Rova could not optimize these deliveries.");
+      return badRequest(error.message || "Rivo could not optimize these deliveries.");
     }
     let optimizedRoutes = 0;
     const appliedTrips = [];
@@ -4251,7 +4251,7 @@ function staticPath(pathname) {
   if (pathname === "/") {
     return "/index.html";
   }
-  if (pathname === "/favicon.ico") return "/assets/rova-logo.png";
+  if (pathname === "/favicon.ico") return "/assets/rova-mark.svg";
   const appRoutes = new Set(["/dispatcher", "/login", "/operations", "/operations.html", "/contact.html", "/pricing.html", "/demo.html", "/industries.html", "/terms.html", "/privacy.html"]);
   if (appRoutes.has(pathname) || pathname === "/setup" || pathname.startsWith("/driver") || pathname.startsWith("/track") || pathname.startsWith("/join")) {
     return "/operations.html";
