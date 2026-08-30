@@ -63,6 +63,8 @@ await expectStatus("/industries.html", 200, /Built for businesses using their ow
 await expectStatus("/contact.html", 200, /Plan your Rivo operational review/);
 await expectStatus("/contact.html", 200, /https:\/\/app\.floraljet\.llc\/api\/leads/);
 await expectStatus("/contact.html", 200, /id="sales-form"/);
+await expectStatus("/contact.html", 200, /Preferred review date/);
+await expectStatus("/contact.html", 200, /Preferred time window/);
 await expectStatus("/assets/rova-logo.png", 200);
 await expectStatus("/assets/rova-mark.svg", 200);
 await expectStatus("/assets/rivo-logo.png", 200);

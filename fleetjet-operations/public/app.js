@@ -101,7 +101,7 @@ const statusLabels = {
 const leadStageLabels = {
   new: "New",
   qualified: "Qualified",
-  pilot: "Pilot",
+  pilot: "Evaluation",
   won: "Won",
   lost: "Lost"
 };
@@ -1931,7 +1931,7 @@ function leadStagePill(stage) {
 function leadCardHtml(lead) {
   const actions = [
     ["qualified", "Qualify"],
-    ["pilot", "Pilot"],
+    ["pilot", "Evaluation"],
     ["won", "Won"],
     ["lost", "Lost"]
   ].filter(([stage]) => stage !== lead.stage);
@@ -1975,14 +1975,14 @@ function renderAccountsHtml() {
           <div class="panel-header">
             <div>
               <p class="eyebrow">Accounts</p>
-              <h2 class="panel-title">Pilot requests</h2>
+              <h2 class="panel-title">Operational reviews</h2>
               <p class="panel-subtitle">Private dispatcher workspace for inbound requests, qualification, and onboarding.</p>
             </div>
             <span class="count-chip">${activeLeads.length}</span>
           </div>
           <div class="panel-body">
             <div class="lead-list">
-              ${leads.length ? leads.map(leadCardHtml).join("") : `<div class="empty">New pilot requests appear here after the public form is submitted.</div>`}
+              ${leads.length ? leads.map(leadCardHtml).join("") : `<div class="empty">New operational-review requests appear here after the public form is submitted.</div>`}
             </div>
           </div>
         </div>
@@ -1992,7 +1992,7 @@ function renderAccountsHtml() {
             <div class="panel-header">
               <div>
                 <h3 class="panel-title">Pipeline status</h3>
-                <p class="panel-subtitle">A quick read on the accounts moving through the pilot process.</p>
+                <p class="panel-subtitle">A quick read on accounts moving from review into evaluation and onboarding.</p>
               </div>
             </div>
             <div class="panel-body">
@@ -2032,10 +2032,10 @@ function renderAccountsHtml() {
               <div class="accounts-checklist growth-checklist">
                 <div><strong>Connect orders</strong><span>Link Wix, Shopify, WooCommerce, Square, or webhook intake.</span></div>
                 <div><strong>Add drivers</strong><span>Send invitation links so every driver can create their own account.</span></div>
-                <div><strong>Run pilot week</strong><span>Dispatch live work, confirm tracking, then review mileage and payroll.</span></div>
+                <div><strong>Run the evaluation</strong><span>Dispatch live work, confirm tracking, then review mileage and payroll.</span></div>
               </div>
               <div class="accounts-stats growth-stats">
-                <div><span>Pilots</span><strong>${pilots}</strong></div>
+                <div><span>Evaluations</span><strong>${pilots}</strong></div>
                 <div><span>Avg. weekly</span><strong>${averageWeeklyVolume}</strong></div>
               </div>
             </div>

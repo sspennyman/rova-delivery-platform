@@ -950,6 +950,11 @@
     font-size: 0.9rem;
     font-weight: 850;
   }
+  .field small {
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
   input, select, textarea {
     width: 100%;
     border: 1px solid var(--line);
@@ -1120,6 +1125,9 @@
       <div class="field"><label for="weeklyDeliveries">Deliveries per week</label><input id="weeklyDeliveries" name="weeklyDeliveries" type="number" min="1" step="1" placeholder="125" required></div>
       <div class="field"><label for="primaryChannel">Main order source</label><select id="primaryChannel" name="primaryChannel"><option value="">Choose one</option><option>Shopify</option><option>Square</option><option>WooCommerce</option><option>Wix</option><option>Phone or email</option><option>API</option><option>Other</option></select></div>
       <div class="field"><label for="drivers">Drivers and courier partners</label><input id="drivers" name="drivers" placeholder="4 employees, 8 contractors, preferred local courier..."></div>
+      <div class="field"><label for="preferredReviewDate">Preferred review date</label><input id="preferredReviewDate" name="preferredReviewDate" type="date" required><small>Choose a weekday. We will confirm the time by email.</small></div>
+      <div class="field"><label for="preferredReviewWindow">Preferred time window</label><select id="preferredReviewWindow" name="preferredReviewWindow" required><option value="">Choose one</option><option>9–11 AM Eastern</option><option>11 AM–1 PM Eastern</option><option>1–3 PM Eastern</option><option>3–5 PM Eastern</option></select></div>
+      <div class="field"><label for="preferredContactMethod">Preferred contact method</label><select id="preferredContactMethod" name="preferredContactMethod" required><option value="">Choose one</option><option>Email</option><option>Phone</option></select></div>
       <div class="field"><label for="notes">Biggest operations problem</label><textarea id="notes" name="notes" placeholder="Manual dispatching, route planning, customer status calls, mileage, proof, payroll..."></textarea></div>
       <div class="field" style="position:absolute;left:-10000px" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
       <div class="actions">
@@ -1146,13 +1154,30 @@
   const salesForm = document.getElementById("sales-form");
   const salesStatus = document.getElementById("sales-status");
   const salesSubmit = document.getElementById("sales-submit");
+  const preferredReviewDate = document.getElementById("preferredReviewDate");
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  preferredReviewDate.min = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  preferredReviewDate.addEventListener("change", () => {
+    const day = new Date(`${preferredReviewDate.value}T12:00:00`).getDay();
+    preferredReviewDate.setCustomValidity(day === 0 || day === 6 ? "Please choose a weekday." : "");
+  });
   salesForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(salesForm).entries());
     body.weeklyDeliveries = Number(body.weeklyDeliveries || 0);
     const leadSource = new URLSearchParams(window.location.search).get("utm_source");
-    body.notes = [body.notes, body.drivers ? `Driver team: ${body.drivers}` : "", leadSource ? `Lead source: ${leadSource}` : ""].filter(Boolean).join("\n");
+    body.notes = [
+      body.notes,
+      body.drivers ? `Driver team: ${body.drivers}` : "",
+      body.preferredReviewDate ? `Preferred review: ${body.preferredReviewDate} · ${body.preferredReviewWindow}` : "",
+      body.preferredContactMethod ? `Preferred contact: ${body.preferredContactMethod}` : "",
+      leadSource ? `Lead source: ${leadSource}` : ""
+    ].filter(Boolean).join("\n");
     delete body.drivers;
+    delete body.preferredReviewDate;
+    delete body.preferredReviewWindow;
+    delete body.preferredContactMethod;
     salesSubmit.disabled = true;
     salesSubmit.textContent = "Sending...";
     salesStatus.textContent = "Submitting your request securely...";
