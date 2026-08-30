@@ -1096,21 +1096,21 @@
       <a href="pricing.html">Pricing</a>
       <a href="contact.html">Contact</a>
       <a class="login-link" href="https://app.floraljet.llc/">Log in</a>
-      <a class="nav-cta" href="contact.html">Book Demo</a>
+      <a class="nav-cta" href="contact.html">Start Pilot</a>
     </div>
   </div>
 </nav>
   <header class="page-hero">
   <div class="wrap">
-    <p class="eyebrow">Get started</p>
-    <h1>See Rivo with your orders, delivery capacity, and workflow.</h1>
-    <p class="lede">We will show you the daily workflow and how Rivo can connect to your current website, store, POS, or API without forcing your team to rebuild how customers order.</p>
+    <p class="eyebrow">Founding 10 · 14-day guided pilot</p>
+    <h1>Put one real delivery day through Rivo.</h1>
+    <p class="lede">We will help load your orders, add your drivers or courier partners, and map the first routes with you. Use the workflow for 14 days before deciding whether to subscribe.</p>
   </div>
 </header>
 <main class="wrap" id="main">
   <section class="band contact-card">
-    <h2>Start a guided Rivo pilot</h2>
-    <p>Share the basics of your operation. We will reply with the right plan, integration path, and a practical rollout for your staff.</p>
+    <h2>Claim one of 10 onboarding spots</h2>
+    <p>Share the basics of your operation. We will reply with a practical pilot plan built around your delivery volume, drivers, and order source.</p>
     <form id="sales-form">
       <div class="field"><label for="companyName">Company</label><input id="companyName" name="companyName" autocomplete="organization" required></div>
       <div class="field"><label for="contactName">Your name</label><input id="contactName" name="contactName" autocomplete="name" required></div>
@@ -1123,9 +1123,9 @@
       <div class="field"><label for="notes">Biggest operations problem</label><textarea id="notes" name="notes" placeholder="Manual dispatching, route planning, customer status calls, mileage, proof, payroll..."></textarea></div>
       <div class="field" style="position:absolute;left:-10000px" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
       <div class="actions">
-        <button class="button" id="sales-submit" type="submit">Book my demo</button>
+        <button class="button" id="sales-submit" type="submit">Claim my pilot spot</button>
       </div>
-      <p class="form-note" id="sales-status" role="status" aria-live="polite">Plans start at $249 CAD/month. No payment is required to request a demo.</p>
+      <p class="form-note" id="sales-status" role="status" aria-live="polite">The guided 14-day pilot requires no payment. Plans start at $99 CAD/month if you continue.</p>
     </form>
   </section>
 </main>
@@ -1150,7 +1150,8 @@
     event.preventDefault();
     const body = Object.fromEntries(new FormData(salesForm).entries());
     body.weeklyDeliveries = Number(body.weeklyDeliveries || 0);
-    body.notes = [body.notes, body.drivers ? `Driver team: ${body.drivers}` : ""].filter(Boolean).join("\n");
+    const leadSource = new URLSearchParams(window.location.search).get("utm_source");
+    body.notes = [body.notes, body.drivers ? `Driver team: ${body.drivers}` : "", leadSource ? `Lead source: ${leadSource}` : ""].filter(Boolean).join("\n");
     delete body.drivers;
     salesSubmit.disabled = true;
     salesSubmit.textContent = "Sending...";
@@ -1164,7 +1165,7 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Your request could not be sent.");
       salesForm.reset();
-      salesStatus.textContent = payload.message || "Thanks. Your Rivo demo request is in the queue.";
+      salesStatus.textContent = payload.message || "Thanks. Your Rivo pilot request is in the queue.";
       salesSubmit.textContent = "Request received";
     } catch (error) {
       salesStatus.textContent = `${error.message} Email hello@floraljet.llc and we will help.`;

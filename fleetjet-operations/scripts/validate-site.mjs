@@ -334,7 +334,7 @@ const duplicateLeadResponse = await reloadedWorker.default.fetch(
   }),
   env
 );
-assert.equal(duplicateLeadResponse.status, 202, "rapid duplicate demo requests should not flood the sales pipeline");
+assert.equal(duplicateLeadResponse.status, 202, "rapid duplicate pilot requests should not flood the sales pipeline");
 assert.equal((await duplicateLeadResponse.json()).lead.id, leadCreatePayload.lead.id);
 
 const unauthenticatedLeadStageResponse = await reloadedWorker.default.fetch(

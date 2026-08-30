@@ -2641,7 +2641,7 @@ async function handleApi(request, env, url) {
       return leadJson(request, {
         ok: true,
         lead: publicLead(recentDuplicate),
-        message: "Thanks. Your Rivo demo request is already in the queue."
+        message: "Thanks. Your Rivo pilot request is already in the queue."
       }, 202);
     }
     const lead = {
@@ -2667,7 +2667,7 @@ async function handleApi(request, env, url) {
     return leadJson(request, {
       ok: true,
       lead: publicLead(lead),
-      message: "Thanks. Your Rivo demo request is in the queue."
+      message: "Thanks. Your Rivo pilot request is in the queue."
     }, 201);
   }
 

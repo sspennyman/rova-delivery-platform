@@ -60,7 +60,7 @@ await expectStatus("/pricing.html", 200, /Plans that scale with your delivery te
 await expectStatus("/pricing.html", 200, /\$99-\$399\/mo/);
 await expectStatus("/pricing.html", 200, /Flexible plans for different delivery teams/);
 await expectStatus("/industries.html", 200, /Built for businesses using their own drivers, courier partners, or both/);
-await expectStatus("/contact.html", 200, /See Rivo with your orders, delivery capacity, and workflow/);
+await expectStatus("/contact.html", 200, /Put one real delivery day through Rivo/);
 await expectStatus("/contact.html", 200, /https:\/\/app\.floraljet\.llc\/api\/leads/);
 await expectStatus("/contact.html", 200, /id="sales-form"/);
 await expectStatus("/assets/rova-logo.png", 200);
@@ -88,6 +88,8 @@ assert.match(homepage, /Plans start at \$99 CAD per month/, "the homepage should
 assert.match(homepage, /Home → Work and Depot → Home/, "the homepage should explain paid home-route support");
 assert.match(homepage, /Proof and exception records[\s\S]*photo or recipient signature/i, "the homepage should describe the released proof workflow");
 assert.match(homepage, /own drivers and third-party couriers/i, "the homepage should position Rivo for hybrid local-delivery operations");
+assert.match(homepage, /Founding 10/, "the homepage should present the current guided-pilot offer");
+assert.match(homepage, /14 days/, "the homepage should explain the pilot duration");
 assert.match(homepage, /Set up in under 10 minutes[\s\S]*Your drivers \+ courier partners[\s\S]*Plans from \$99 CAD/, "the hero should lead with fast setup, flexible fulfilment, and transparent pricing");
 assert.match(homepage, /own drivers and third-party couriers[\s\S]*request, status, reference number, fee, and tracking link/i, "the homepage should explain the released courier-partner workflow");
 assert.match(homepage, /clearly marked as not sent/i, "courier request copy must distinguish prepared requests from sent messages");

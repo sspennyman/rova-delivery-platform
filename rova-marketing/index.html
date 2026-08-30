@@ -1351,6 +1351,44 @@
       box-shadow: 0 24px 60px rgba(49, 94, 231, 0.22);
     }
 
+    .founding-offer {
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr);
+      gap: clamp(28px, 5vw, 72px);
+      align-items: center;
+      padding: clamp(32px, 6vw, 64px);
+      border: 1px solid #cbd9fb;
+      border-radius: 24px;
+      background:
+        radial-gradient(circle at 92% 8%, rgba(54, 215, 230, .2), transparent 19rem),
+        linear-gradient(135deg, #f8fbff, #eef4ff);
+      box-shadow: 0 28px 70px rgba(49, 94, 231, .14);
+    }
+
+    .founding-offer::after {
+      content: "10";
+      position: absolute;
+      right: -18px;
+      bottom: -58px;
+      color: rgba(49, 94, 231, .07);
+      font-size: clamp(13rem, 24vw, 22rem);
+      font-weight: 900;
+      line-height: .8;
+      letter-spacing: -.12em;
+      pointer-events: none;
+    }
+
+    .founding-offer h2 { max-width: 740px; margin: 10px 0 16px; }
+    .founding-offer-copy { max-width: 700px; color: #51617b; font-size: 1.04rem; line-height: 1.7; }
+    .founding-offer .actions { margin-top: 24px; }
+    .founding-terms { position: relative; z-index: 1; display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+    .founding-terms li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; padding: 16px; border: 1px solid rgba(49, 94, 231, .16); border-radius: 14px; background: rgba(255,255,255,.82); }
+    .founding-terms b { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; background: #315ee7; color: #fff; }
+    .founding-terms strong { display: block; color: #111a31; }
+    .founding-terms span { display: block; margin-top: 3px; color: #65728a; font-size: .88rem; line-height: 1.45; }
+
     @media (max-width: 1120px) {
       .proof-float { right: 12px; }
       .route-float { left: 12px; }
@@ -1358,6 +1396,7 @@
       .product-proof-copy { max-width: 760px; }
       .video-grid { grid-template-columns: 1fr; }
       .video-copy { max-width: 760px; }
+      .founding-offer { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 860px) {
@@ -1498,7 +1537,7 @@
         <a href="pricing.html">Pricing</a>
         <a href="contact.html">Company</a>
         <a class="login-link" href="https://app.floraljet.llc/">Log in</a>
-        <a class="nav-cta" href="contact.html">Book a demo</a>
+        <a class="nav-cta" href="contact.html">Start a pilot</a>
       </div>
     </div>
   </nav>
@@ -1511,7 +1550,7 @@
         <p class="lede">Everything you need to run local delivery. Dispatch. Route. Track. Deliver. Rivo gives your team a fast, focused command centre without enterprise software complexity.</p>
         <div class="actions">
           <a class="button" href="demo.html">See Rivo in action</a>
-          <a class="button secondary" href="contact.html">Book a working demo</a>
+          <a class="button secondary" href="contact.html">Start a 14-day pilot</a>
         </div>
         <div class="hero-note" aria-label="Rivo platform features">
           <span>Set up in under 10 minutes</span>
@@ -1745,13 +1784,32 @@
       </div>
     </section>
 
+    <section class="section white" id="founding-10">
+      <div class="wrap founding-offer">
+        <div>
+          <p class="eyebrow">Founding 10 · Canada</p>
+          <h2>Put one real delivery day through Rivo—before you subscribe.</h2>
+          <p class="founding-offer-copy">We are onboarding 10 local delivery teams this month. We will help load your orders, add your drivers or courier partners, and map the first routes with you. Use Rivo for 14 days. If it does not make dispatch easier, do not subscribe.</p>
+          <div class="actions">
+            <a class="button" href="contact.html">Claim a pilot spot</a>
+            <a class="text-link" href="demo.html">Try the live workflow first</a>
+          </div>
+        </div>
+        <ul class="founding-terms" aria-label="Founding pilot terms">
+          <li><b>1</b><div><strong>Guided setup included</strong><span>Your first delivery day is configured with you, not handed off as homework.</span></div></li>
+          <li><b>2</b><div><strong>No payment for the pilot</strong><span>Test the operating workflow for 14 days before confirming a plan.</span></div></li>
+          <li><b>3</b><div><strong>From $99 CAD monthly</strong><span>Continue only if the workflow saves your team time and gives customers a better delivery experience.</span></div></li>
+        </ul>
+      </div>
+    </section>
+
     <section class="section white">
       <div class="wrap outcome-band">
         <div>
           <h2>Use your own drivers, courier partners, or both.</h2>
           <p>Bring your current drivers, preferred delivery providers, routes, service windows, and customer workflows into Rivo. We connect to the website or API you already use and roll out around how your team works.</p>
         </div>
-        <a class="button light" href="contact.html">Book a Rivo demo</a>
+        <a class="button light" href="contact.html">Start the 14-day pilot</a>
       </div>
     </section>
   </main>
