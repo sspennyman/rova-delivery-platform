@@ -1936,6 +1936,11 @@ function leadCardHtml(lead) {
     ["lost", "Lost"]
   ].filter(([stage]) => stage !== lead.stage);
   const weekly = Number(lead.weeklyDeliveries || 0);
+  const attribution = lead.attribution || {};
+  const source = attribution.source || "direct";
+  const reviewPreference = lead.preferredReviewDate
+    ? `${lead.preferredReviewDate}${lead.preferredReviewWindow ? ` · ${lead.preferredReviewWindow}` : ""}`
+    : "";
   return `
     <article class="lead-card">
       <div class="lead-card-main">
@@ -1949,7 +1954,12 @@ function leadCardHtml(lead) {
         <span>${weekly ? `${weekly.toLocaleString()} weekly deliveries` : "Volume not entered"}</span>
         <span>${h(lead.deliveryCategory || "Delivery business")}</span>
         <span>${h(lead.primaryChannel || "Channel unknown")}</span>
+        <span>Source ${h(source)}</span>
+        ${attribution.campaign ? `<span>Campaign ${h(attribution.campaign)}</span>` : ""}
+        ${reviewPreference ? `<span>Review ${h(reviewPreference)}</span>` : ""}
+        ${lead.preferredContactMethod ? `<span>Contact by ${h(lead.preferredContactMethod)}</span>` : ""}
         <span>Fit ${Number(lead.score || 0)}/100</span>
+        <span>Received ${h(formatDate(lead.createdAt))}</span>
       </div>
       ${lead.notes ? `<p class="lead-notes">${h(lead.notes)}</p>` : ""}
       <div class="item-actions">
@@ -1965,6 +1975,11 @@ function renderAccountsHtml() {
   const qualified = leads.filter((lead) => ["qualified", "pilot"].includes(lead.stage)).length;
   const pilots = leads.filter((lead) => lead.stage === "pilot").length;
   const customers = leads.filter((lead) => lead.stage === "won").length;
+  const sourceBreakdown = Object.entries(leads.reduce((counts, lead) => {
+    const source = lead.attribution?.source || "direct";
+    counts[source] = (counts[source] || 0) + 1;
+    return counts;
+  }, {})).sort((left, right) => right[1] - left[1]);
   const averageWeeklyVolume = leads.length
     ? Math.round(leads.reduce((total, lead) => total + Number(lead.weeklyDeliveries || 0), 0) / leads.length)
     : 0;
@@ -1999,7 +2014,24 @@ function renderAccountsHtml() {
               <div class="accounts-stats growth-stats">
                 <div><span>Active</span><strong>${activeLeads.length}</strong></div>
                 <div><span>Qualified</span><strong>${qualified}</strong></div>
+                <div><span>Evaluations</span><strong>${pilots}</strong></div>
                 <div><span>Customers</span><strong>${customers}</strong></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">Acquisition sources</h3>
+                <p class="panel-subtitle">Verified inbound requests grouped by their first recorded campaign source.</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="accounts-checklist growth-checklist">
+                ${sourceBreakdown.length
+                  ? sourceBreakdown.slice(0, 6).map(([source, count]) => `<div><strong>${h(source)}</strong><span>${count} request${count === 1 ? "" : "s"}</span></div>`).join("")
+                  : `<div><strong>No requests yet</strong><span>Campaign attribution appears after the first operational-review form is submitted.</span></div>`}
               </div>
             </div>
           </div>

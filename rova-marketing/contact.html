@@ -1166,18 +1166,31 @@
     event.preventDefault();
     const body = Object.fromEntries(new FormData(salesForm).entries());
     body.weeklyDeliveries = Number(body.weeklyDeliveries || 0);
-    const leadSource = new URLSearchParams(window.location.search).get("utm_source");
+    const pageUrl = new URL(window.location.href);
+    const cleanAttributionValue = (value, maxLength = 120) => String(value || "").trim().slice(0, maxLength);
+    let referrerHost = "";
+    try {
+      referrerHost = document.referrer ? new URL(document.referrer).hostname : "";
+    } catch {
+      referrerHost = "";
+    }
+    if (referrerHost === pageUrl.hostname) referrerHost = "";
+    body.preferredReviewDate = cleanAttributionValue(body.preferredReviewDate, 10);
+    body.preferredReviewWindow = cleanAttributionValue(body.preferredReviewWindow, 80);
+    body.preferredContactMethod = cleanAttributionValue(body.preferredContactMethod, 20);
+    body.attribution = {
+      source: cleanAttributionValue(pageUrl.searchParams.get("utm_source") || (referrerHost ? "referral" : "direct"), 80),
+      medium: cleanAttributionValue(pageUrl.searchParams.get("utm_medium"), 80),
+      campaign: cleanAttributionValue(pageUrl.searchParams.get("utm_campaign"), 120),
+      content: cleanAttributionValue(pageUrl.searchParams.get("utm_content"), 120),
+      landingPath: cleanAttributionValue(pageUrl.pathname, 180),
+      referrerHost: cleanAttributionValue(referrerHost, 255)
+    };
     body.notes = [
       body.notes,
-      body.drivers ? `Driver team: ${body.drivers}` : "",
-      body.preferredReviewDate ? `Preferred review: ${body.preferredReviewDate} · ${body.preferredReviewWindow}` : "",
-      body.preferredContactMethod ? `Preferred contact: ${body.preferredContactMethod}` : "",
-      leadSource ? `Lead source: ${leadSource}` : ""
+      body.drivers ? `Driver team: ${body.drivers}` : ""
     ].filter(Boolean).join("\n");
     delete body.drivers;
-    delete body.preferredReviewDate;
-    delete body.preferredReviewWindow;
-    delete body.preferredContactMethod;
     salesSubmit.disabled = true;
     salesSubmit.textContent = "Sending...";
     salesStatus.textContent = "Submitting your request securely...";

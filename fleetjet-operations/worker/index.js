@@ -10,6 +10,7 @@ const LOGIN_ATTEMPT_LIMIT = 8;
 const PERSISTED_DB_TABLE = "delivery_tracker_state_v1";
 const PERSISTED_DB_KEY = "primary";
 const LEAD_STAGES = new Set(["new", "qualified", "pilot", "won", "lost"]);
+const LEAD_CONTACT_METHODS = new Set(["Email", "Phone"]);
 const COURIER_REQUEST_METHODS = new Set(["email", "booking", "manual"]);
 const COURIER_REQUEST_STATUSES = new Set(["ready-to-share", "send-failed", "requested", "accepted", "picked-up", "delivered", "declined", "cancelled"]);
 const OPEN_COURIER_REQUEST_STATUSES = new Set(["ready-to-share", "send-failed", "requested", "accepted", "picked-up"]);
@@ -1405,6 +1406,23 @@ function leadScore(lead) {
   return Math.min(95, score);
 }
 
+function cleanLeadField(value, maxLength) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function leadAttribution(value) {
+  const attribution = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const landingPath = cleanLeadField(attribution.landingPath, 180);
+  return {
+    source: cleanLeadField(attribution.source, 80) || "direct",
+    medium: cleanLeadField(attribution.medium, 80),
+    campaign: cleanLeadField(attribution.campaign, 120),
+    content: cleanLeadField(attribution.content, 120),
+    landingPath: landingPath.startsWith("/") ? landingPath : "",
+    referrerHost: cleanLeadField(attribution.referrerHost, 255).toLowerCase()
+  };
+}
+
 function publicLead(lead) {
   return {
     id: lead.id,
@@ -1416,6 +1434,10 @@ function publicLead(lead) {
     deliveryCategory: lead.deliveryCategory || "",
     primaryChannel: lead.primaryChannel || "",
     notes: lead.notes || "",
+    preferredReviewDate: lead.preferredReviewDate || "",
+    preferredReviewWindow: lead.preferredReviewWindow || "",
+    preferredContactMethod: lead.preferredContactMethod || "",
+    attribution: leadAttribution(lead.attribution),
     stage: LEAD_STAGES.has(lead.stage) ? lead.stage : "new",
     score: Number(lead.score || 0),
     createdAt: lead.createdAt || null,
@@ -2629,6 +2651,9 @@ async function handleApi(request, env, url) {
     const contactName = String(body.contactName || "").trim();
     const email = normalizeEmail(body.email);
     const weeklyDeliveries = Math.max(0, Math.round(Number(body.weeklyDeliveries || 0)));
+    const preferredReviewDate = cleanLeadField(body.preferredReviewDate, 10);
+    const preferredReviewWindow = cleanLeadField(body.preferredReviewWindow, 80);
+    const preferredContactMethod = cleanLeadField(body.preferredContactMethod, 20);
     if (companyName.length < 2) return leadJson(request, { error: "Company name is required." }, 400);
     if (companyName.length > 120) return leadJson(request, { error: "Company name is too long." }, 400);
     if (contactName.length < 2) return leadJson(request, { error: "Contact name is required." }, 400);
@@ -2636,6 +2661,12 @@ async function handleApi(request, env, url) {
     if (!validEmail(email)) return leadJson(request, { error: "A valid work email is required." }, 400);
     if (String(body.phone || "").trim().length > 40) return leadJson(request, { error: "Phone number is too long." }, 400);
     if (String(body.notes || "").trim().length > 2000) return leadJson(request, { error: "Please shorten the operations note." }, 400);
+    if (preferredReviewDate && !/^\d{4}-\d{2}-\d{2}$/.test(preferredReviewDate)) {
+      return leadJson(request, { error: "Choose a valid preferred review date." }, 400);
+    }
+    if (preferredContactMethod && !LEAD_CONTACT_METHODS.has(preferredContactMethod)) {
+      return leadJson(request, { error: "Choose email or phone as the preferred contact method." }, 400);
+    }
     const recentDuplicate = db.leads.find((item) => item.email === email && Date.now() - new Date(item.createdAt || 0).getTime() < 15 * 60 * 1000);
     if (recentDuplicate) {
       return leadJson(request, {
@@ -2654,6 +2685,10 @@ async function handleApi(request, env, url) {
       deliveryCategory: String(body.deliveryCategory || "").trim(),
       primaryChannel: String(body.primaryChannel || "").trim(),
       notes: String(body.notes || "").trim(),
+      preferredReviewDate,
+      preferredReviewWindow,
+      preferredContactMethod,
+      attribution: leadAttribution(body.attribution),
       stage: "new",
       score: 0,
       createdAt: nowIso(),

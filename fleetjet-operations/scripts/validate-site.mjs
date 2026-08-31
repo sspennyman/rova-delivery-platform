@@ -308,7 +308,18 @@ const leadCreateResponse = await reloadedWorker.default.fetch(
       weeklyDeliveries: 250,
       deliveryCategory: "Courier",
       primaryChannel: "Shopify",
-      notes: "Manual route planning and status calls are slowing the team down."
+      notes: "Manual route planning and status calls are slowing the team down.",
+      preferredReviewDate: "2026-09-02",
+      preferredReviewWindow: "11 AM–1 PM Eastern",
+      preferredContactMethod: "Email",
+      attribution: {
+        source: "outbound_pharmacy",
+        medium: "email",
+        campaign: "august_operational_review",
+        content: "route_visibility",
+        landingPath: "/contact.html",
+        referrerHost: "mail.google.com"
+      }
     })
   }),
   env
@@ -319,6 +330,17 @@ const leadCreatePayload = await leadCreateResponse.json();
 assert.match(leadCreatePayload.lead.id, /^lead_/, "pilot requests should receive a lead id");
 assert.equal(leadCreatePayload.lead.stage, "new");
 assert.equal(leadCreatePayload.lead.email, "ops@example.com");
+assert.equal(leadCreatePayload.lead.preferredReviewDate, "2026-09-02");
+assert.equal(leadCreatePayload.lead.preferredReviewWindow, "11 AM–1 PM Eastern");
+assert.equal(leadCreatePayload.lead.preferredContactMethod, "Email");
+assert.deepEqual(leadCreatePayload.lead.attribution, {
+  source: "outbound_pharmacy",
+  medium: "email",
+  campaign: "august_operational_review",
+  content: "route_visibility",
+  landingPath: "/contact.html",
+  referrerHost: "mail.google.com"
+});
 assert.ok(leadCreatePayload.lead.score >= 70, "high-volume channel leads should be scored as good-fit prospects");
 
 const duplicateLeadResponse = await reloadedWorker.default.fetch(
