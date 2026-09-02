@@ -210,7 +210,7 @@ assert.equal(setupPayload.snapshot.courierRequests.length, 0, "a fresh productio
 const setupState = JSON.parse(database.row.payload_json);
 assert.ok(setupState.ownerAccount?.passwordHash, "owner passwords should be stored as hashes");
 assert.equal(setupState.ownerAccount?.passwordAlgorithm, "pbkdf2-sha256", "owner passwords should use PBKDF2");
-assert.equal(setupState.ownerAccount?.passwordIterations, 210000, "owner password hashing should use the configured work factor");
+assert.equal(setupState.ownerAccount?.passwordIterations, 100000, "owner password hashing should stay within the production runtime limit");
 assert.equal(setupState.ownerAccount?.password, undefined, "owner passwords must not be stored in plaintext");
 assert.doesNotMatch(database.row.payload_json, /validation-password/, "the saved state must not contain the owner password");
 assert.equal(setupPayload.snapshot.invitationEmail.configured, false, "the UI should expose manual sharing when email delivery is not configured");
@@ -460,6 +460,7 @@ assert.doesNotMatch(database.row.payload_json, /driver-password/, "the saved sta
 const acceptedState = JSON.parse(database.row.payload_json);
 const acceptedDriver = acceptedState.drivers.find((driver) => driver.id === driverCreatePayload.driver.id);
 assert.equal(acceptedDriver.passwordAlgorithm, "pbkdf2-sha256", "driver passwords should use PBKDF2");
+assert.equal(acceptedDriver.passwordIterations, 100000, "driver password hashing should stay within the production runtime limit");
 assert.equal(acceptedDriver.inviteTokenHash, undefined, "accepted invitation tokens should be invalidated immediately");
 assert.equal(acceptedDriver.status, "available", "accepted driver accounts should become available when no route is active");
 

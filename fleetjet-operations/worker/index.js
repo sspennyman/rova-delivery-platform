@@ -4,7 +4,11 @@ const DEFAULT_PICKUP_ADDRESS = "1675 Cyrville Rd";
 const WIX_PICKUP_NAME = "Cyrville";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
-const PASSWORD_HASH_ITERATIONS = 210000;
+// Cloudflare Workers rejects PBKDF2 iteration counts above 100,000.
+// Keep the configured work factor at the runtime ceiling so account setup,
+// invitation acceptance, and subsequent login use the same stored parameters.
+const PASSWORD_HASH_ITERATIONS = 100000;
+const MAX_PASSWORD_HASH_ITERATIONS = 100000;
 const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_ATTEMPT_LIMIT = 8;
 const PERSISTED_DB_TABLE = "delivery_tracker_state_v1";
@@ -131,6 +135,10 @@ async function legacyPasswordHash(password, salt) {
 }
 
 async function accountPasswordHash(password, salt, iterations = PASSWORD_HASH_ITERATIONS) {
+  const normalizedIterations = Number(iterations);
+  if (!Number.isSafeInteger(normalizedIterations) || normalizedIterations < 1 || normalizedIterations > MAX_PASSWORD_HASH_ITERATIONS) {
+    throw new Error("This account needs a new secure invitation before it can sign in.");
+  }
   const material = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(String(password || "")),
@@ -143,7 +151,7 @@ async function accountPasswordHash(password, salt, iterations = PASSWORD_HASH_IT
       name: "PBKDF2",
       hash: "SHA-256",
       salt: new TextEncoder().encode(String(salt || "")),
-      iterations
+      iterations: normalizedIterations
     },
     material,
     256
@@ -164,8 +172,10 @@ async function passwordMatches(account, password) {
   if (!account) return false;
   if (account.passwordHash && account.passwordSalt) {
     if (account.passwordAlgorithm === "pbkdf2-sha256") {
+      const iterations = Number(account.passwordIterations || PASSWORD_HASH_ITERATIONS);
+      if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > MAX_PASSWORD_HASH_ITERATIONS) return false;
       return constantTimeEqual(
-        await accountPasswordHash(password, account.passwordSalt, Number(account.passwordIterations || PASSWORD_HASH_ITERATIONS)),
+        await accountPasswordHash(password, account.passwordSalt, iterations),
         account.passwordHash
       );
     }
