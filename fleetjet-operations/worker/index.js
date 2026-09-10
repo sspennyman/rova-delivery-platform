@@ -168,6 +168,12 @@ async function setPassword(account, password) {
   delete account.password;
 }
 
+function passwordHashNeedsRuntimeUpgrade(account) {
+  if (!account?.passwordHash || account.passwordAlgorithm !== "pbkdf2-sha256") return false;
+  const iterations = Number(account.passwordIterations || PASSWORD_HASH_ITERATIONS);
+  return !Number.isSafeInteger(iterations) || iterations < 1 || iterations > MAX_PASSWORD_HASH_ITERATIONS;
+}
+
 async function passwordMatches(account, password) {
   if (!account) return false;
   if (account.passwordHash && account.passwordSalt) {
@@ -1865,7 +1871,11 @@ async function loginUser(db, env, identifier, password) {
   }
   const credentials = dispatcherCredentials(env);
   if (credentials && String(identifier || "").trim().toLowerCase() === credentials.username && constantTimeEqual(password, credentials.password)) {
-    return { role: "dispatcher", name: "Dispatcher" };
+    if (owner?.username && String(owner.username).toLowerCase() === credentials.username && passwordHashNeedsRuntimeUpgrade(owner)) {
+      await setPassword(owner, password);
+      owner.updatedAt = nowIso();
+    }
+    return { role: "dispatcher", name: owner?.name || "Dispatcher" };
   }
   const driver = await driverByLogin(db, identifier, password);
   if (!driver) return null;
@@ -2763,9 +2773,18 @@ async function handleApi(request, env, url) {
         { "Retry-After": String(retryAfter) }
       );
     }
+    const ownerIdentifierMatches = db.ownerAccount?.username
+      && String(body.identifier || "").trim().toLowerCase() === String(db.ownerAccount.username).toLowerCase();
+    const ownerUpgradeRequired = ownerIdentifierMatches && passwordHashNeedsRuntimeUpgrade(db.ownerAccount);
     const user = await loginUser(db, env, body.identifier, body.password);
     if (!user) {
       recordLoginFailure(attemptKey);
+      if (ownerUpgradeRequired) {
+        return authJson({
+          error: "This owner account needs a one-time password upgrade. Use Owner account recovery below.",
+          code: "password_upgrade_required"
+        }, 409);
+      }
       return authJson({ error: "Email or password is incorrect. Drivers must use their invitation link once before signing in." }, 401);
     }
     loginAttempts.delete(attemptKey);
@@ -2784,6 +2803,35 @@ async function handleApi(request, env, url) {
       session: publicSession(nextSession),
       snapshot: nextSnapshot
     });
+  }
+
+  if (method === "POST" && url.pathname === "/api/auth/owner-recovery") {
+    const configuredCode = setupCode(env);
+    if (!configuredCode || !db.ownerAccount?.username) return unauthorized("Owner account recovery is not enabled.");
+    const body = await readBody(request);
+    const identifier = String(body.identifier || "").trim().toLowerCase();
+    const password = String(body.password || "");
+    const attemptKey = loginAttemptKey(request, identifier || "owner-recovery");
+    const retryAfter = loginRetryAfterSeconds(attemptKey);
+    if (retryAfter) {
+      return authJson({ error: "Too many recovery attempts. Wait a few minutes and try again." }, 429, { "Retry-After": String(retryAfter) });
+    }
+    const validOwner = identifier === String(db.ownerAccount.username).toLowerCase();
+    const validSetupCode = constantTimeEqual(String(body.setupCode || "").trim(), configuredCode);
+    if (!validOwner || !validSetupCode) {
+      recordLoginFailure(attemptKey);
+      return authJson({ error: "The dispatcher username or owner setup code is incorrect." }, 401);
+    }
+    if (password.length < 8) return authJson({ error: "Password must be at least 8 characters." }, 400);
+    await setPassword(db.ownerAccount, password);
+    db.ownerAccount.updatedAt = nowIso();
+    db.sessions = (db.sessions || []).filter((item) => item.role !== "dispatcher");
+    loginAttempts.delete(attemptKey);
+    const nextSession = createSession(db, { role: "dispatcher", name: db.ownerAccount.name || "Owner" });
+    await writeDb(db, env);
+    const nextSnapshot = snapshot(db, env);
+    broadcastSnapshot(db, env);
+    return authJson({ session: publicSession(nextSession), snapshot: nextSnapshot });
   }
 
   if (method === "GET" && url.pathname === "/api/auth/invite") {

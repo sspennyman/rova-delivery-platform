@@ -44,6 +44,8 @@ work/
 ROVA_APOLLO_*
 ROVA_OUTREACH_*
 ROVA_SEND_BATCH_*
+RIVO_CLIENT_*
+RIVO_OUTREACH_*
 
 # Operating-system and editor files
 .DS_Store

@@ -29,9 +29,9 @@ const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
 assert.match(appHtml, /id="app"/, "the public root should load the Rivo application shell");
 assert.match(appHtml, /delivery-driver-tracker\.spennyman\.chatgpt\.site[\s\S]*app\.floraljet\.llc/, "the app shell should replace the old alias before rendering");
-assert.match(appHtml, /app\.js\?v=40/, "the public root should load the latest Rivo app bundle");
+assert.match(appHtml, /app\.js\?v=41/, "the public root should load the latest Rivo app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
-assert.match(operationsHtml, /app\.js\?v=40/, "the dispatcher route should load the latest Rivo app bundle");
+assert.match(operationsHtml, /app\.js\?v=41/, "the dispatcher route should load the latest Rivo app bundle");
 
 const hosting = JSON.parse(fs.readFileSync(path.join(root, "dist/.openai/hosting.json"), "utf8"));
 if (!hosting.project_id) {
@@ -86,6 +86,14 @@ assert.match(appSource, /data-signature-pad/, "drivers should be able to collect
 assert.match(appSource, /Resolve delivery issues/, "dispatchers should have a first-class exception recovery workflow");
 assert.match(appSource, /Search customer, order, address, or driver/, "the daily queue should be searchable without leaving dispatch");
 assert.match(stylesSource, /\.today-glance/, "the dispatch view should include a compact daily closeout summary");
+assert.match(appSource, /Customize layout/, "dispatchers should be able to open dashboard customization");
+assert.match(appSource, /rivoDispatcherDashboardLayoutV1/, "dashboard layout preferences should persist on the device");
+assert.match(appSource, /data-dashboard-drag-handle/, "dashboard sections should support drag-and-drop ordering");
+assert.match(appSource, /resize-dashboard-widget/, "dashboard sections should support compact or full-width sizing");
+assert.match(stylesSource, /\.dashboard-board[\s\S]*grid-template-columns: repeat\(12/, "the operations dashboard should use a rearrangeable grid");
+assert.match(stylesSource, /\.dispatch-side-stack,\s*\n\.route-preview-panel \{\s*\n\s*position: static/, "the route map should stay in normal page flow while scrolling");
+assert.match(appSource, /Repair owner sign-in/, "legacy owner accounts should have a visible recovery flow");
+assert.match(appSource, /\/api\/auth\/owner-recovery/, "the owner recovery form should use the protected recovery endpoint");
 assert.match(appSource, /Connect stores and order webhooks/, "connections should be a first-class product workflow");
 assert.doesNotMatch(appSource, /Revenue ladder|SaaS target model|data-view="growth"|id="growth"|Growth plan/, "public app bundle should not ship old growth strategy copy");
 
@@ -1689,5 +1697,65 @@ const manualDeliveryPayload = await manualDeliveryResponse.json();
 assert.equal(manualDeliveryPayload.delivery.status, "queued");
 assert.equal(manualDeliveryPayload.delivery.priority, "urgent");
 assert.equal(manualDeliveryPayload.delivery.customerPhone, "+16135550199");
+
+const legacyDatabase = new FakeD1();
+const legacyEnv = {
+  ...env,
+  DB: legacyDatabase,
+  OWNER_SETUP_CODE: "legacy-recovery-code"
+};
+const legacyWorker = await loadFreshWorker("legacy-owner-recovery");
+const legacySetupResponse = await legacyWorker.default.fetch(
+  new Request("https://vms.test/api/auth/setup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      setupCode: "legacy-recovery-code",
+      companyName: "Legacy Rivo",
+      name: "Legacy Owner",
+      username: "legacy.owner",
+      password: "old-owner-password"
+    })
+  }),
+  legacyEnv
+);
+assert.equal(legacySetupResponse.status, 201);
+const legacyState = JSON.parse(legacyDatabase.row.payload_json);
+legacyState.ownerAccount.passwordIterations = 210000;
+legacyDatabase.row.payload_json = JSON.stringify(legacyState);
+
+const legacyLoginResponse = await legacyWorker.default.fetch(
+  new Request("https://vms.test/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier: "legacy.owner", password: "old-owner-password" })
+  }),
+  legacyEnv
+);
+assert.equal(legacyLoginResponse.status, 409, "an unsupported legacy owner hash should request recovery instead of throwing a PBKDF2 runtime error");
+assert.equal((await legacyLoginResponse.json()).code, "password_upgrade_required");
+
+const ownerRecoveryResponse = await legacyWorker.default.fetch(
+  new Request("https://vms.test/api/auth/owner-recovery", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier: "legacy.owner", setupCode: "legacy-recovery-code", password: "new-owner-password" })
+  }),
+  legacyEnv
+);
+assert.equal(ownerRecoveryResponse.status, 200, "the owner setup code should repair an unsupported password hash");
+assert.equal((await ownerRecoveryResponse.json()).session.role, "dispatcher");
+const recoveredOwner = JSON.parse(legacyDatabase.row.payload_json).ownerAccount;
+assert.equal(recoveredOwner.passwordIterations, 100000, "owner recovery should migrate the password to the runtime-supported work factor");
+
+const recoveredLoginResponse = await legacyWorker.default.fetch(
+  new Request("https://vms.test/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier: "legacy.owner", password: "new-owner-password" })
+  }),
+  legacyEnv
+);
+assert.equal(recoveredLoginResponse.status, 200, "the recovered owner should be able to sign in normally");
 
 console.log("Sites bundle validated.");

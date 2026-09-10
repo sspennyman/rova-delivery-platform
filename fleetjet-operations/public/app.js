@@ -1,7 +1,55 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const AUTH_STORAGE_KEY = "deliveryAuthSession";
+const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV1";
 const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings"]);
+const DASHBOARD_WIDGETS = [
+  { id: "overview", label: "Daily overview", defaultWidth: "wide" },
+  { id: "assistant", label: "Smart dispatch", defaultWidth: "wide" },
+  { id: "issues", label: "Delivery issues", defaultWidth: "wide" },
+  { id: "active", label: "Active deliveries", defaultWidth: "half" },
+  { id: "orders", label: "Order queue", defaultWidth: "half" },
+  { id: "map", label: "Route preview", defaultWidth: "half" },
+  { id: "create", label: "Create delivery", defaultWidth: "half" }
+];
+
+function defaultDashboardLayout() {
+  return {
+    order: DASHBOARD_WIDGETS.map((widget) => widget.id),
+    hidden: [],
+    widths: Object.fromEntries(DASHBOARD_WIDGETS.map((widget) => [widget.id, widget.defaultWidth]))
+  };
+}
+
+function normalizeDashboardLayout(value) {
+  const defaults = defaultDashboardLayout();
+  const known = new Set(defaults.order);
+  const suppliedOrder = Array.isArray(value?.order) ? value.order.filter((id) => known.has(id)) : [];
+  const order = [...new Set([...suppliedOrder, ...defaults.order])];
+  const hidden = Array.isArray(value?.hidden) ? [...new Set(value.hidden.filter((id) => known.has(id)))] : [];
+  const widths = { ...defaults.widths };
+  for (const id of order) {
+    if (["half", "wide"].includes(value?.widths?.[id])) widths[id] = value.widths[id];
+  }
+  return { order, hidden, widths };
+}
+
+function readDashboardLayout() {
+  try {
+    return normalizeDashboardLayout(JSON.parse(window.localStorage.getItem(DASHBOARD_LAYOUT_STORAGE_KEY) || "null"));
+  } catch {
+    return defaultDashboardLayout();
+  }
+}
+
+function saveDashboardLayout() {
+  state.dashboardLayout = normalizeDashboardLayout(state.dashboardLayout);
+  try {
+    window.localStorage.setItem(DASHBOARD_LAYOUT_STORAGE_KEY, JSON.stringify(state.dashboardLayout));
+  } catch {
+    // Local preferences still work for this session when storage is unavailable.
+  }
+}
 
 function readStoredAuth() {
   try {
@@ -28,6 +76,9 @@ const state = {
   route: parseRoute(),
   auth: readStoredAuth(),
   loginError: "",
+  ownerRecoveryMode: false,
+  ownerRecoveryIdentifier: "",
+  ownerRecoveryError: "",
   setupError: "",
   inviteError: "",
   inviteActionError: "",
@@ -47,6 +98,8 @@ const state = {
   lastSnapshotSerialized: "",
   lastWebhook: null,
   dispatcherView: "operations",
+  dashboardCustomizing: false,
+  dashboardLayout: readDashboardLayout(),
   setupMode: false,
   setupEnabled: false,
   ownerCreated: false,
@@ -74,6 +127,7 @@ const GOOGLE_ROUTE_CACHE_MS = 30000;
 const OPEN_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 const MAPLIBRE_VERSION = "5.24.0";
 let draggedActiveTrip = null;
+let draggedDashboardWidget = null;
 let activeSignatureCanvas = null;
 
 const statusLabels = {
@@ -173,7 +227,9 @@ function api(path, options = {}) {
     const payload = contentType.includes("application/json") ? await response.json() : await response.text();
     if (!response.ok) {
       const message = payload?.error || response.statusText || "Request failed";
-      throw new Error(message);
+      const error = new Error(message);
+      if (payload && typeof payload === "object" && payload.code) error.code = payload.code;
+      throw error;
     }
     return payload;
   });
@@ -1794,7 +1850,7 @@ function renderLogin() {
                 <form id="login-form" class="form-grid">
                   <div class="field full">
                     <label for="login-identifier">Email or dispatcher username</label>
-                    <input class="input" id="login-identifier" name="identifier" type="text" autocomplete="username" placeholder="driver@company.com" required>
+                    <input class="input" id="login-identifier" name="identifier" type="text" autocomplete="username" placeholder="driver@company.com" value="${h(state.ownerRecoveryIdentifier)}" required>
                   </div>
                   <div class="field full">
                     <label for="login-password">Password</label>
@@ -1804,6 +1860,18 @@ function renderLogin() {
                     <button class="button" type="submit">Log in</button>
                   </div>
                 </form>
+                ${state.ownerCreated && state.setupEnabled ? state.ownerRecoveryMode ? `
+                  <section class="owner-recovery" aria-label="Owner account recovery">
+                    <div class="owner-recovery-heading"><div><strong>Repair owner sign-in</strong><span>Use the setup code for this workspace and choose a new password. Delivery records will not be changed.</span></div><button class="button ghost compact-action" data-action="toggle-owner-recovery" type="button">Cancel</button></div>
+                    ${state.ownerRecoveryError ? `<div class="lead-message error">${h(state.ownerRecoveryError)}</div>` : ""}
+                    <form id="owner-recovery-form" class="form-grid">
+                      <div class="field full"><label for="recovery-identifier">Dispatcher username</label><input class="input" id="recovery-identifier" name="identifier" autocomplete="username" value="${h(state.ownerRecoveryIdentifier)}" required></div>
+                      <div class="field full"><label for="recovery-code">Owner setup code</label><div class="password-field"><input class="input" id="recovery-code" name="setupCode" type="password" autocomplete="one-time-code" required><button class="password-toggle" data-action="toggle-password" data-target="recovery-code" type="button">Show</button></div></div>
+                      <div class="field full"><label for="recovery-password">New password</label><div class="password-field"><input class="input" id="recovery-password" name="password" type="password" autocomplete="new-password" minlength="8" required><button class="password-toggle" data-action="toggle-password" data-target="recovery-password" type="button">Show</button></div></div>
+                      <div class="field full"><label for="recovery-confirm">Confirm new password</label><input class="input" id="recovery-confirm" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></div>
+                      <div class="field full"><button class="button" type="submit">Upgrade password and sign in</button></div>
+                    </form>
+                  </section>` : `<button class="owner-recovery-link" data-action="toggle-owner-recovery" type="button">Owner locked out?</button>` : ""}
                 <details class="login-support"><summary>Driver sign-in help</summary><div><strong>First time here?</strong> Open the latest invitation from your dispatcher and create your password. Returning drivers sign in with their email. If your link expired or you forgot your password, ask dispatch to send a new secure link.</div></details>
                 <div class="login-help"><strong>New to Rivo?</strong> <a href="https://floraljet.llc/contact.html">Book a guided walkthrough</a>.</div>
                 ${!state.ownerCreated && state.setupEnabled ? `
@@ -2348,6 +2416,69 @@ function activeDeliveriesPanelHtml(active) {
     </div>`;
 }
 
+function dashboardWidgetDefinition(id) {
+  return DASHBOARD_WIDGETS.find((widget) => widget.id === id);
+}
+
+function dashboardWidgetHtml(id, content) {
+  const definition = dashboardWidgetDefinition(id);
+  if (!definition || !content || state.dashboardLayout.hidden.includes(id)) return "";
+  const width = state.dashboardLayout.widths[id] === "wide" ? "wide" : "half";
+  return `
+    <div class="dashboard-widget dashboard-widget-${width}${state.dashboardCustomizing ? " is-customizing" : ""}" data-dashboard-widget="${h(id)}">
+      <div class="dashboard-widget-controls" aria-label="Move or resize ${h(definition.label)}">
+        <button class="dashboard-drag-handle" data-dashboard-drag-handle draggable="true" type="button" title="Drag ${h(definition.label)}" aria-label="Drag ${h(definition.label)}">⋮⋮</button>
+        <strong>${h(definition.label)}</strong>
+        <span></span>
+        <button class="widget-control" data-action="move-dashboard-widget" data-widget-id="${h(id)}" data-direction="up" type="button" aria-label="Move ${h(definition.label)} earlier">↑</button>
+        <button class="widget-control" data-action="move-dashboard-widget" data-widget-id="${h(id)}" data-direction="down" type="button" aria-label="Move ${h(definition.label)} later">↓</button>
+        <button class="widget-control widget-width-control" data-action="resize-dashboard-widget" data-widget-id="${h(id)}" type="button">${width === "wide" ? "Half width" : "Full width"}</button>
+        <button class="widget-control" data-action="toggle-dashboard-widget" data-widget-id="${h(id)}" type="button">Hide</button>
+      </div>
+      ${content}
+    </div>`;
+}
+
+function dashboardCustomizerHtml() {
+  return `
+    <section class="dashboard-customizer"${state.dashboardCustomizing ? "" : " hidden"} aria-label="Dashboard layout settings">
+      <div>
+        <p class="eyebrow">Your workspace</p>
+        <h2>Arrange the dashboard around your day</h2>
+        <p>Drag visible cards into order, change their width, or hide anything you do not need. This layout is saved on this device.</p>
+      </div>
+      <div class="dashboard-visibility-list" aria-label="Visible dashboard sections">
+        ${DASHBOARD_WIDGETS.map((widget) => {
+          const visible = !state.dashboardLayout.hidden.includes(widget.id);
+          return `<button class="visibility-chip${visible ? " active" : ""}" data-action="toggle-dashboard-widget" data-widget-id="${h(widget.id)}" type="button" aria-pressed="${visible}"><span>${visible ? "✓" : "+"}</span>${h(widget.label)}</button>`;
+        }).join("")}
+      </div>
+      <div class="dashboard-customizer-actions">
+        <button class="button secondary" data-action="reset-dashboard-layout" type="button">Reset layout</button>
+        <button class="button" data-action="toggle-dashboard-customizer" type="button">Done customizing</button>
+      </div>
+    </section>`;
+}
+
+function dashboardBoardHtml(widgetContent) {
+  const ordered = state.dashboardLayout.order
+    .map((id) => dashboardWidgetHtml(id, widgetContent[id]))
+    .filter(Boolean)
+    .join("");
+  return `<section class="dashboard-board${state.dashboardCustomizing ? " is-customizing" : ""}" aria-label="Customizable operations dashboard">${ordered}</section>`;
+}
+
+function moveDashboardWidget(widgetId, direction) {
+  const order = [...state.dashboardLayout.order];
+  const index = order.indexOf(widgetId);
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return false;
+  [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+  state.dashboardLayout.order = order;
+  saveDashboardLayout();
+  return true;
+}
+
 function renderDispatcher() {
   if (state.auth?.role !== "dispatcher") {
     renderLogin();
@@ -2388,7 +2519,7 @@ function renderDispatcher() {
         <p class="page-subtitle">${viewSubtitle}</p>
       </div>
       <div class="toolbar">
-        ${view === "operations" ? `<button class="button" data-action="open-create-delivery" type="button">New delivery</button>` : ""}
+        ${view === "operations" ? `<button class="button secondary dashboard-customize-button${state.dashboardCustomizing ? " active" : ""}" data-action="toggle-dashboard-customizer" type="button" aria-pressed="${state.dashboardCustomizing}">${state.dashboardCustomizing ? "Done" : "Customize layout"}</button><button class="button" data-action="open-create-delivery" type="button">New delivery</button>` : ""}
         ${view === "drivers" ? `<button class="button secondary" data-action="open-courier-form" type="button">Add courier</button><button class="button" data-action="open-driver-form" type="button">Add driver</button>` : ""}
         ${view === "channels" ? `<button class="button" data-action="sync-channels" type="button">Sync all</button>` : ""}
         ${view !== "operations" ? `<button class="button secondary mobile-secondary-action" data-action="dispatcher-view" data-view="operations" type="button">Back to today</button>` : ""}
@@ -2398,40 +2529,16 @@ function renderDispatcher() {
     ${["channels", "accounts", "settings"].includes(view) ? workspaceToolsNav() : ""}
 
     <div class="${viewClass("operations")}">
-    ${todayAtGlanceHtml(trips)}
-    ${dispatchAssistantPanelHtml()}
-    ${exceptionPanelHtml(trips)}
-    <section class="dashboard-section operations-orders" id="orders" aria-label="Orders and route map">
-      <div class="dispatch-workspace">
-        <div class="dispatch-worklist">
-          ${courierRequestsPanelHtml()}
-          ${activeDeliveriesPanelHtml(active)}
-          ${channelOrdersPanel(trips)}
-        </div>
-
-        <div class="dispatch-side-stack">
-          <div class="panel route-preview-panel">
-            <div class="panel-header">
-              <div>
-                <h2 class="panel-title">Route preview</h2>
-                <p class="panel-subtitle">Select orders to preview their route. Active driver locations appear automatically.</p>
-              </div>
-            </div>
-            <div class="panel-body">
-              ${renderMapBlock("dispatcher-map", mapTrips, { label: selectedPreview.length ? "Selected route" : active.length ? "Live fleet" : "Recent routes" })}
-            </div>
-          </div>
-
-          <details class="panel manage-panel create-delivery-panel" id="create-delivery">
-            <summary class="manage-summary">
-              <span><span class="panel-title">Create delivery</span><span class="panel-subtitle">Add a manual delivery only when it is not coming from a connected site.</span></span>
-              <span class="summary-control" aria-hidden="true">+</span>
-            </summary>
-            <div class="panel-body">${queuedDeliveryFormHtml()}</div>
-          </details>
-        </div>
-      </div>
-    </section>
+    ${dashboardCustomizerHtml()}
+    ${dashboardBoardHtml({
+      overview: todayAtGlanceHtml(trips),
+      assistant: dispatchAssistantPanelHtml(),
+      issues: exceptionPanelHtml(trips),
+      active: `<div class="dashboard-widget-stack">${courierRequestsPanelHtml()}${activeDeliveriesPanelHtml(active)}</div>`,
+      orders: `<section class="operations-orders" id="orders" aria-label="Order queue">${channelOrdersPanel(trips)}</section>`,
+      map: `<div class="panel route-preview-panel"><div class="panel-header"><div><h2 class="panel-title">Route preview</h2><p class="panel-subtitle">Select orders to preview their route. Active driver locations appear automatically.</p></div></div><div class="panel-body">${renderMapBlock("dispatcher-map", mapTrips, { label: selectedPreview.length ? "Selected route" : active.length ? "Live fleet" : "Recent routes" })}</div></div>`,
+      create: `<details class="panel manage-panel create-delivery-panel" id="create-delivery"><summary class="manage-summary"><span><span class="panel-title">Create delivery</span><span class="panel-subtitle">Add a manual delivery only when it is not coming from a connected site.</span></span><span class="summary-control" aria-hidden="true">+</span></summary><div class="panel-body">${queuedDeliveryFormHtml()}</div></details>`
+    })}
     ${onboardingHtml({ compact: true })}
     </div>
 
@@ -4259,6 +4366,7 @@ async function updateLeadStage(leadId, stage) {
 
 async function loginTeam(identifier, password) {
   state.loginError = "";
+  state.ownerRecoveryIdentifier = String(identifier || "").trim();
   try {
     const response = await api("/api/auth/login", {
       method: "POST",
@@ -4267,6 +4375,8 @@ async function loginTeam(identifier, password) {
     });
     state.auth = response.session;
     state.snapshot = response.snapshot;
+    state.ownerRecoveryMode = false;
+    state.ownerRecoveryError = "";
     writeStoredAuth(state.auth);
     connectSnapshotStream();
     window.history.replaceState({}, "", dispatcherPath());
@@ -4275,6 +4385,7 @@ async function loginTeam(identifier, password) {
     state.auth = null;
     state.snapshot = null;
     state.loginError = error.message || "Login failed.";
+    if (error.code === "password_upgrade_required") state.ownerRecoveryMode = true;
     writeStoredAuth(null);
     renderLogin();
   }
@@ -4423,6 +4534,41 @@ app.addEventListener("click", async (event) => {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+    if (action === "toggle-dashboard-customizer") {
+      state.dashboardCustomizing = !state.dashboardCustomizing;
+      render();
+      return;
+    }
+    if (action === "reset-dashboard-layout") {
+      state.dashboardLayout = defaultDashboardLayout();
+      saveDashboardLayout();
+      render();
+      toast("Dashboard layout reset");
+      return;
+    }
+    if (action === "toggle-dashboard-widget") {
+      const widgetId = target.dataset.widgetId || "";
+      if (!dashboardWidgetDefinition(widgetId)) return;
+      const hidden = new Set(state.dashboardLayout.hidden);
+      if (hidden.has(widgetId)) hidden.delete(widgetId);
+      else hidden.add(widgetId);
+      state.dashboardLayout.hidden = [...hidden];
+      saveDashboardLayout();
+      render();
+      return;
+    }
+    if (action === "resize-dashboard-widget") {
+      const widgetId = target.dataset.widgetId || "";
+      if (!dashboardWidgetDefinition(widgetId)) return;
+      state.dashboardLayout.widths[widgetId] = state.dashboardLayout.widths[widgetId] === "wide" ? "half" : "wide";
+      saveDashboardLayout();
+      render();
+      return;
+    }
+    if (action === "move-dashboard-widget") {
+      if (moveDashboardWidget(target.dataset.widgetId || "", target.dataset.direction || "down")) render();
+      return;
+    }
     if (action === "route-preset") {
       const form = target.closest("form");
       const purpose = form?.querySelector('[name="customerName"]');
@@ -4529,6 +4675,14 @@ app.addEventListener("click", async (event) => {
       renderLogin();
       return;
     }
+    if (action === "toggle-owner-recovery") {
+      state.ownerRecoveryMode = !state.ownerRecoveryMode;
+      state.ownerRecoveryError = "";
+      state.loginError = "";
+      renderLogin();
+      requestAnimationFrame(() => document.getElementById(state.ownerRecoveryMode ? "recovery-identifier" : "login-identifier")?.focus());
+      return;
+    }
     if (action === "logout") {
       await logoutTeam();
       return;
@@ -4550,12 +4704,18 @@ app.addEventListener("click", async (event) => {
       return;
     }
     if (action === "open-create-delivery") {
-      const formPanel = document.getElementById("create-delivery");
-      if (formPanel) {
+      if (state.dashboardLayout.hidden.includes("create")) {
+        state.dashboardLayout.hidden = state.dashboardLayout.hidden.filter((id) => id !== "create");
+        saveDashboardLayout();
+        render();
+      }
+      requestAnimationFrame(() => {
+        const formPanel = document.getElementById("create-delivery");
+        if (!formPanel) return;
         formPanel.open = true;
         formPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         requestAnimationFrame(() => formPanel.querySelector("input, select, textarea")?.focus());
-      }
+      });
       return;
     }
     if (action === "sync-wix") {
@@ -4719,6 +4879,15 @@ app.addEventListener("click", async (event) => {
 });
 
 app.addEventListener("dragstart", (event) => {
+  const dashboardHandle = event.target.closest("[data-dashboard-drag-handle]");
+  const dashboardWidget = dashboardHandle?.closest("[data-dashboard-widget]");
+  if (dashboardWidget) {
+    draggedDashboardWidget = dashboardWidget;
+    dashboardWidget.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", dashboardWidget.dataset.dashboardWidget || "");
+    return;
+  }
   const handle = event.target.closest("[data-route-drag-handle]");
   const item = handle?.closest("[data-active-trip-id]");
   if (!item) return;
@@ -4729,6 +4898,18 @@ app.addEventListener("dragstart", (event) => {
 });
 
 app.addEventListener("dragover", (event) => {
+  if (draggedDashboardWidget) {
+    const board = event.target.closest(".dashboard-board");
+    if (!board) return;
+    event.preventDefault();
+    const target = event.target.closest("[data-dashboard-widget]");
+    if (!target || target === draggedDashboardWidget) return;
+    const box = target.getBoundingClientRect();
+    const before = event.clientY < box.top + box.height / 2
+      || (event.clientY <= box.bottom && event.clientX < box.left + box.width / 2);
+    board.insertBefore(draggedDashboardWidget, before ? target : target.nextSibling);
+    return;
+  }
   const group = event.target.closest("[data-active-route-driver]");
   if (!group || !draggedActiveTrip || group.dataset.activeRouteKey !== draggedActiveTrip.dataset.routeKey) return;
   event.preventDefault();
@@ -4739,6 +4920,19 @@ app.addEventListener("dragover", (event) => {
 });
 
 app.addEventListener("dragend", async () => {
+  if (draggedDashboardWidget) {
+    const widget = draggedDashboardWidget;
+    draggedDashboardWidget = null;
+    widget.classList.remove("dragging");
+    const visibleOrder = [...document.querySelectorAll("[data-dashboard-widget]")]
+      .map((item) => item.dataset.dashboardWidget)
+      .filter(Boolean);
+    const remaining = state.dashboardLayout.order.filter((id) => !visibleOrder.includes(id));
+    state.dashboardLayout.order = [...visibleOrder, ...remaining];
+    saveDashboardLayout();
+    toast("Dashboard layout saved");
+    return;
+  }
   const item = draggedActiveTrip;
   draggedActiveTrip = null;
   if (!item) return;
@@ -4776,6 +4970,38 @@ app.addEventListener("submit", async (event) => {
     if (form.id === "login-form") {
       const body = formObject(form);
       await loginTeam(String(body.identifier || ""), String(body.password || ""));
+      return;
+    }
+
+    if (form.id === "owner-recovery-form") {
+      const body = formObject(form);
+      state.ownerRecoveryError = "";
+      if (body.password !== body.confirmPassword) {
+        state.ownerRecoveryError = "Passwords do not match.";
+        renderLogin();
+        return;
+      }
+      try {
+        const response = await api("/api/auth/owner-recovery", {
+          method: "POST",
+          auth: false,
+          body: { identifier: body.identifier, setupCode: body.setupCode, password: body.password }
+        });
+        state.auth = response.session;
+        state.snapshot = response.snapshot;
+        state.company = response.snapshot?.company || state.company;
+        state.ownerRecoveryMode = false;
+        state.ownerRecoveryError = "";
+        state.loginError = "";
+        writeStoredAuth(state.auth);
+        connectSnapshotStream();
+        window.history.replaceState({}, "", dispatcherPath());
+        render();
+        toast("Password upgraded");
+      } catch (error) {
+        state.ownerRecoveryError = error.message || "Owner recovery failed.";
+        renderLogin();
+      }
       return;
     }
 
@@ -5016,7 +5242,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=40").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=41").catch(() => {});
   });
 }
 
