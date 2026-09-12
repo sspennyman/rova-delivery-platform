@@ -1,22 +1,22 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const AUTH_STORAGE_KEY = "deliveryAuthSession";
-const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV1";
+const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV2";
 const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings"]);
 const DASHBOARD_WIDGETS = [
   { id: "overview", label: "Daily overview", defaultWidth: "wide" },
-  { id: "assistant", label: "Smart dispatch", defaultWidth: "wide" },
   { id: "issues", label: "Delivery issues", defaultWidth: "wide" },
-  { id: "active", label: "Active deliveries", defaultWidth: "half" },
-  { id: "orders", label: "Order queue", defaultWidth: "half" },
+  { id: "orders", label: "Order queue", defaultWidth: "wide" },
   { id: "map", label: "Route preview", defaultWidth: "half" },
+  { id: "active", label: "Active deliveries", defaultWidth: "half" },
+  { id: "assistant", label: "Route optimizer", defaultWidth: "wide" },
   { id: "create", label: "Create delivery", defaultWidth: "half" }
 ];
 
 function defaultDashboardLayout() {
   return {
     order: DASHBOARD_WIDGETS.map((widget) => widget.id),
-    hidden: [],
+    hidden: ["assistant", "create"],
     widths: Object.fromEntries(DASHBOARD_WIDGETS.map((widget) => [widget.id, widget.defaultWidth]))
   };
 }
@@ -2350,14 +2350,14 @@ function todayAtGlanceHtml(trips) {
   const open = trips.filter((trip) => ["queued", "active"].includes(trip.status));
   const km = delivered.reduce((total, trip) => total + Number(trip.distanceKm || 0), 0);
   const decided = delivered.length + issues.length + failed.length;
-  const success = decided ? Math.round((delivered.length / decided) * 100) : 100;
+  const success = decided ? Math.round((delivered.length / decided) * 100) : null;
   const attention = issues.length + failed.length;
   return `
     <section class="today-glance" aria-label="Today at a glance">
       <div class="today-glance-copy">
         <p class="eyebrow">Live operations</p>
-        <h2>${attention ? `${attention} delivery issue${attention === 1 ? "" : "s"} need attention` : open.length ? `${open.length} deliver${open.length === 1 ? "y is" : "ies are"} in motion` : "Every delivery is accounted for"}</h2>
-        <p>${attention ? "Resolve exceptions without leaving this workspace." : `${success}% completed successfully. Select work, preview the route, and dispatch below.`}</p>
+        <h2>${attention ? `${attention} delivery issue${attention === 1 ? "" : "s"} need attention` : open.length ? `${open.length} deliver${open.length === 1 ? "y is" : "ies are"} in motion` : trips.length ? "Every delivery is accounted for" : "Ready for the first delivery"}</h2>
+        <p>${attention ? "Resolve the exceptions below." : success === null ? "Add or sync orders, select the stops, then preview and dispatch." : `${success}% completed successfully today.`}</p>
       </div>
       <div class="today-kpis">
         <div><strong>${open.length}</strong><span>Open</span></div>
@@ -2398,7 +2398,7 @@ function exceptionPanelHtml(trips) {
 
 function activeDeliveriesPanelHtml(active) {
   return `
-    <div class="panel active-deliveries-panel">
+    <div class="panel active-deliveries-panel" id="active-deliveries">
       <div class="panel-header">
         <div>
           <p class="eyebrow">On the road</p>
@@ -2443,9 +2443,9 @@ function dashboardCustomizerHtml() {
   return `
     <section class="dashboard-customizer"${state.dashboardCustomizing ? "" : " hidden"} aria-label="Dashboard layout settings">
       <div>
-        <p class="eyebrow">Your workspace</p>
-        <h2>Arrange the dashboard around your day</h2>
-        <p>Drag visible cards into order, change their width, or hide anything you do not need. This layout is saved on this device.</p>
+        <p class="eyebrow">Layout</p>
+        <h2>Keep only what you use</h2>
+        <p>Move, resize, or hide sections. Your layout stays on this device.</p>
       </div>
       <div class="dashboard-visibility-list" aria-label="Visible dashboard sections">
         ${DASHBOARD_WIDGETS.map((widget) => {
@@ -2455,7 +2455,7 @@ function dashboardCustomizerHtml() {
       </div>
       <div class="dashboard-customizer-actions">
         <button class="button secondary" data-action="reset-dashboard-layout" type="button">Reset layout</button>
-        <button class="button" data-action="toggle-dashboard-customizer" type="button">Done customizing</button>
+        <button class="button" data-action="toggle-dashboard-customizer" type="button">Done</button>
       </div>
     </section>`;
 }
@@ -2466,6 +2466,16 @@ function dashboardBoardHtml(widgetContent) {
     .filter(Boolean)
     .join("");
   return `<section class="dashboard-board${state.dashboardCustomizing ? " is-customizing" : ""}" aria-label="Customizable operations dashboard">${ordered}</section>`;
+}
+
+function operationsFlowNavHtml(trips, active, selectedPreview) {
+  const queued = queuedTrips();
+  return `
+    <nav class="operations-flowbar" aria-label="Dispatch workflow">
+      <a href="#orders"><span>1</span><strong>Orders</strong><small>${queued.length} waiting</small></a>
+      <a href="#route-preview"><span>2</span><strong>Route</strong><small>${selectedPreview.length ? `${selectedPreview.length} selected` : "Select stops"}</small></a>
+      <a href="#active-deliveries"><span>3</span><strong>On the road</strong><small>${active.length} active</small></a>
+    </nav>`;
 }
 
 function moveDashboardWidget(widgetId, direction) {
@@ -2519,7 +2529,7 @@ function renderDispatcher() {
         <p class="page-subtitle">${viewSubtitle}</p>
       </div>
       <div class="toolbar">
-        ${view === "operations" ? `<button class="button secondary dashboard-customize-button${state.dashboardCustomizing ? " active" : ""}" data-action="toggle-dashboard-customizer" type="button" aria-pressed="${state.dashboardCustomizing}">${state.dashboardCustomizing ? "Done" : "Customize layout"}</button><button class="button" data-action="open-create-delivery" type="button">New delivery</button>` : ""}
+        ${view === "operations" ? `<button class="button ghost dashboard-customize-button${state.dashboardCustomizing ? " active" : ""}" data-action="toggle-dashboard-customizer" type="button" aria-pressed="${state.dashboardCustomizing}" title="Arrange dashboard sections">${state.dashboardCustomizing ? "Done" : "Arrange"}</button><button class="button" data-action="open-create-delivery" type="button">New delivery</button>` : ""}
         ${view === "drivers" ? `<button class="button secondary" data-action="open-courier-form" type="button">Add courier</button><button class="button" data-action="open-driver-form" type="button">Add driver</button>` : ""}
         ${view === "channels" ? `<button class="button" data-action="sync-channels" type="button">Sync all</button>` : ""}
         ${view !== "operations" ? `<button class="button secondary mobile-secondary-action" data-action="dispatcher-view" data-view="operations" type="button">Back to today</button>` : ""}
@@ -2530,13 +2540,14 @@ function renderDispatcher() {
 
     <div class="${viewClass("operations")}">
     ${dashboardCustomizerHtml()}
+    ${operationsFlowNavHtml(trips, active, selectedPreview)}
     ${dashboardBoardHtml({
       overview: todayAtGlanceHtml(trips),
       assistant: dispatchAssistantPanelHtml(),
       issues: exceptionPanelHtml(trips),
       active: `<div class="dashboard-widget-stack">${courierRequestsPanelHtml()}${activeDeliveriesPanelHtml(active)}</div>`,
       orders: `<section class="operations-orders" id="orders" aria-label="Order queue">${channelOrdersPanel(trips)}</section>`,
-      map: `<div class="panel route-preview-panel"><div class="panel-header"><div><h2 class="panel-title">Route preview</h2><p class="panel-subtitle">Select orders to preview their route. Active driver locations appear automatically.</p></div></div><div class="panel-body">${renderMapBlock("dispatcher-map", mapTrips, { label: selectedPreview.length ? "Selected route" : active.length ? "Live fleet" : "Recent routes" })}</div></div>`,
+      map: `<div class="panel route-preview-panel" id="route-preview"><div class="panel-header"><div><h2 class="panel-title">Route preview</h2><p class="panel-subtitle">Select orders to preview their route. Active driver locations appear automatically.</p></div></div><div class="panel-body">${renderMapBlock("dispatcher-map", mapTrips, { label: selectedPreview.length ? "Selected route" : active.length ? "Live fleet" : "Recent routes" })}</div></div>`,
       create: `<details class="panel manage-panel create-delivery-panel" id="create-delivery"><summary class="manage-summary"><span><span class="panel-title">Create delivery</span><span class="panel-subtitle">Add a manual delivery only when it is not coming from a connected site.</span></span><span class="summary-control" aria-hidden="true">+</span></summary><div class="panel-body">${queuedDeliveryFormHtml()}</div></details>`
     })}
     ${onboardingHtml({ compact: true })}
@@ -5242,7 +5253,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=41").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=42").catch(() => {});
   });
 }
 

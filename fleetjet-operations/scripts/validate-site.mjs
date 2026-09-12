@@ -29,9 +29,9 @@ const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
 assert.match(appHtml, /id="app"/, "the public root should load the Rivo application shell");
 assert.match(appHtml, /delivery-driver-tracker\.spennyman\.chatgpt\.site[\s\S]*app\.floraljet\.llc/, "the app shell should replace the old alias before rendering");
-assert.match(appHtml, /app\.js\?v=41/, "the public root should load the latest Rivo app bundle");
+assert.match(appHtml, /app\.js\?v=42/, "the public root should load the latest Rivo app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
-assert.match(operationsHtml, /app\.js\?v=41/, "the dispatcher route should load the latest Rivo app bundle");
+assert.match(operationsHtml, /app\.js\?v=42/, "the dispatcher route should load the latest Rivo app bundle");
 
 const hosting = JSON.parse(fs.readFileSync(path.join(root, "dist/.openai/hosting.json"), "utf8"));
 if (!hosting.project_id) {
@@ -86,8 +86,10 @@ assert.match(appSource, /data-signature-pad/, "drivers should be able to collect
 assert.match(appSource, /Resolve delivery issues/, "dispatchers should have a first-class exception recovery workflow");
 assert.match(appSource, /Search customer, order, address, or driver/, "the daily queue should be searchable without leaving dispatch");
 assert.match(stylesSource, /\.today-glance/, "the dispatch view should include a compact daily closeout summary");
-assert.match(appSource, /Customize layout/, "dispatchers should be able to open dashboard customization");
-assert.match(appSource, /rivoDispatcherDashboardLayoutV1/, "dashboard layout preferences should persist on the device");
+assert.match(appSource, /Arrange dashboard sections/, "dispatchers should be able to open dashboard customization");
+assert.match(appSource, /rivoDispatcherDashboardLayoutV2/, "dashboard layout preferences should persist on the device");
+assert.match(appSource, /Dispatch workflow/, "the daily dashboard should expose a clear orders-to-route-to-active flow");
+assert.match(appSource, /hidden: \["assistant", "create"\]/, "secondary tools should stay out of the default dispatch flow");
 assert.match(appSource, /data-dashboard-drag-handle/, "dashboard sections should support drag-and-drop ordering");
 assert.match(appSource, /resize-dashboard-widget/, "dashboard sections should support compact or full-width sizing");
 assert.match(stylesSource, /\.dashboard-board[\s\S]*grid-template-columns: repeat\(12/, "the operations dashboard should use a rearrangeable grid");
