@@ -1,7 +1,7 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const AUTH_STORAGE_KEY = "deliveryAuthSession";
-const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV2";
+const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV3";
 const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings"]);
 const DASHBOARD_WIDGETS = [
   { id: "overview", label: "Daily overview", defaultWidth: "wide" },
@@ -26,7 +26,7 @@ function normalizeDashboardLayout(value) {
   const known = new Set(defaults.order);
   const suppliedOrder = Array.isArray(value?.order) ? value.order.filter((id) => known.has(id)) : [];
   const order = [...new Set([...suppliedOrder, ...defaults.order])];
-  const hidden = Array.isArray(value?.hidden) ? [...new Set(value.hidden.filter((id) => known.has(id)))] : [];
+  const hidden = Array.isArray(value?.hidden) ? [...new Set(value.hidden.filter((id) => known.has(id)))] : [...defaults.hidden];
   const widths = { ...defaults.widths };
   for (const id of order) {
     if (["half", "wide"].includes(value?.widths?.[id])) widths[id] = value.widths[id];
@@ -981,9 +981,8 @@ function activeTripItem(trip) {
             `;
           }).join("")}
         </div>
-        <div class="item-actions">${mapsButton}</div>
       `
-    : `<span class="item-detail">Personal mileage is tracked here but excluded from reports.</span><div class="item-actions">${mapsButton}</div>`;
+    : `<span class="item-detail">Personal mileage is tracked here but excluded from reports.</span>`;
   const selectedClass = state.selectedActiveTripIds.has(trip.id) ? " is-selected" : "";
   return `
     <div class="item active-route-stop${selectedClass}" data-active-trip-id="${h(trip.id)}" data-driver-id="${h(trip.driverId)}" data-route-key="${h(trip.routeId || trip.id)}">
@@ -998,16 +997,20 @@ function activeTripItem(trip) {
         </div>
         <div class="item-actions">
           ${statusPill(trip.status)}
+          ${mapsButton}
           ${state.auth?.role === "dispatcher" ? `<button class="button success compact-action" data-action="complete-active-delivery" data-trip-id="${h(trip.id)}" data-trip-name="${h(trip.customerName)}" type="button">Complete</button>` : ""}
         </div>
       </div>
-      ${routeStopLinesHtml(trip)}
       <div class="item-detail">
         ${formatKm(trip.distanceKm)} logged at ${formatRate(trip.kmRate)}. Last update ${relativeTime(trip.location?.timestamp || trip.startedAt)}.
       </div>
-      <div class="trip-actions">
-        ${customerActions}
-      </div>
+      <details class="active-trip-details">
+        <summary>Route details & customer links</summary>
+        <div class="active-trip-details-body">
+          ${routeStopLinesHtml(trip)}
+          <div class="trip-actions">${customerActions}</div>
+        </div>
+      </details>
       ${state.auth?.role === "dispatcher" ? `
         <details class="manage-panel">
           <summary class="manage-summary">
@@ -1296,22 +1299,24 @@ function channelOrdersPanel(trips) {
       </div>
       <div class="panel-body">
         ${connections.filter((item) => item.lastError).map((item) => `<div class="empty">${h(item.name)}: ${h(item.lastError)}</div>`).join("")}
-        ${orderFilterToolbarHtml(channelOrders.length)}
-        ${bulkOrderToolbarHtml(channelOrders)}
-        <div class="section-heading compact-heading">
-          <div><h3 class="panel-title">Dispatch queue</h3><p class="panel-subtitle">Orders waiting for assignment or delivery confirmation.</p></div>
-          <span class="count-chip">${dispatchQueue.length}</span>
-        </div>
-        <div class="list">
-          ${dispatchQueue.length ? dispatchQueue.map(queuedOrderItem).join("") : `<div class="empty">No orders waiting in the dispatch queue.</div>`}
-        </div>
-        ${needsReview.length ? `
-          <div class="section-heading compact-heading review-heading">
-            <div><h3 class="panel-title">Needs review</h3><p class="panel-subtitle">Edit, dispatch again, or mark these orders delivered.</p></div>
-            <span class="count-chip">${needsReview.length}</span>
+        ${channelOrders.length ? `
+          ${orderFilterToolbarHtml(channelOrders.length)}
+          ${bulkOrderToolbarHtml(channelOrders)}
+          <div class="section-heading compact-heading">
+            <div><h3 class="panel-title">Dispatch queue</h3><p class="panel-subtitle">Orders waiting for assignment or delivery confirmation.</p></div>
+            <span class="count-chip">${dispatchQueue.length}</span>
           </div>
-          <div class="list">${needsReview.map(queuedOrderItem).join("")}</div>
-        ` : ""}
+          <div class="list">
+            ${dispatchQueue.length ? dispatchQueue.map(queuedOrderItem).join("") : `<div class="empty compact-empty">No orders waiting in the dispatch queue.</div>`}
+          </div>
+          ${needsReview.length ? `
+            <div class="section-heading compact-heading review-heading">
+              <div><h3 class="panel-title">Needs review</h3><p class="panel-subtitle">Edit, dispatch again, or mark these orders delivered.</p></div>
+              <span class="count-chip">${needsReview.length}</span>
+            </div>
+            <div class="list">${needsReview.map(queuedOrderItem).join("")}</div>
+          ` : ""}
+        ` : `<div class="orders-empty-state"><div><strong>No orders yet</strong><span>Connect a site, sync a channel, or add a delivery manually.</span></div><button class="button" data-action="open-create-delivery" type="button">Add delivery</button></div>`}
       </div>
     </div>
   `;
@@ -5253,7 +5258,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=42").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=44").catch(() => {});
   });
 }
 

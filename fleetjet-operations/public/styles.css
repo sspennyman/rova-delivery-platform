@@ -5189,6 +5189,48 @@ body {
   border-top: 3px solid #315ee7;
 }
 
+.orders-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 76px;
+  padding: 14px 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.orders-empty-state strong,
+.orders-empty-state span {
+  display: block;
+}
+
+.orders-empty-state span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.active-trip-details {
+  border-top: 1px solid var(--line);
+}
+
+.active-trip-details > summary {
+  padding: 9px 0;
+  color: #315ee7;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 780;
+  list-style-position: inside;
+}
+
+.active-trip-details-body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 0 10px;
+}
+
 .dashboard-widget[data-dashboard-widget="map"] .route-preview-panel,
 .dashboard-widget[data-dashboard-widget="active"] .active-deliveries-panel {
   height: 100%;
@@ -5236,6 +5278,15 @@ body {
 
   .operations-flowbar small {
     display: none;
+  }
+
+  .orders-empty-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .orders-empty-state .button {
+    width: 100%;
   }
 
   .route-preview-panel .map-wrap,
