@@ -1,9 +1,10 @@
-const CACHE_NAME = "rivo-operations-v45";
+const CACHE_NAME = "rivo-operations-v46";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/styles.css?v=45",
   "/app.js?v=45",
+  "/canonical-host.js?v=46",
   "/assets/rova-mark.svg",
   "/assets/rivo-logo.png",
   "/manifest.webmanifest",

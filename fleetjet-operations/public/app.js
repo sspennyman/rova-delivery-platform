@@ -5297,7 +5297,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=45").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=46").catch(() => {});
   });
 }
 

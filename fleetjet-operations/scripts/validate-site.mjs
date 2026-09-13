@@ -9,6 +9,7 @@ const requiredFiles = [
   "dist/client/index.html",
   "dist/client/operations.html",
   "dist/client/app.js",
+  "dist/client/canonical-host.js",
   "dist/client/styles.css",
   "dist/client/manifest.webmanifest",
   "dist/client/assets/rova-logo.png",
@@ -28,6 +29,8 @@ for (const relativePath of requiredFiles) {
 const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8");
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
 assert.match(appHtml, /id="app"/, "the public root should load the Rivo application shell");
+assert.match(appHtml, /canonical-host\.js\?v=46/, "cached static pages should still redirect the retired Sites hostname");
+assert.match(appHtml, /Content-Security-Policy/, "the static application shell should enforce browser content restrictions at the CDN edge");
 assert.match(appHtml, /app\.js\?v=45/, "the public root should load the latest Rivo app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
 assert.match(operationsHtml, /app\.js\?v=45/, "the dispatcher route should load the latest Rivo app bundle");
