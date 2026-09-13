@@ -1,6 +1,7 @@
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
-const AUTH_STORAGE_KEY = "deliveryAuthSession";
+const AUTH_STORAGE_KEY = "rivoAuthStateV2";
+const LEGACY_AUTH_STORAGE_KEY = "deliveryAuthSession";
 const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV3";
 const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings"]);
 const DASHBOARD_WIDGETS = [
@@ -53,7 +54,7 @@ function saveDashboardLayout() {
 
 function readStoredAuth() {
   try {
-    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY) || window.localStorage.getItem(LEGACY_AUTH_STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -62,8 +63,11 @@ function readStoredAuth() {
 
 function writeStoredAuth(auth) {
   try {
-    if (auth?.token) window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
-    else window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+    if (auth?.role) {
+      const safeState = { role: auth.role, name: auth.name || "", driverId: auth.driverId || "", expiresAt: auth.expiresAt || "" };
+      window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(safeState));
+    } else window.localStorage.removeItem(AUTH_STORAGE_KEY);
   } catch {
     // Storage can be blocked in private browsing; the in-memory value still works.
   }
@@ -169,7 +173,6 @@ const colorChoices = [
   { value: "#0f766e", label: "Teal" }
 ];
 const DEFAULT_PICKUP_ADDRESS = "1675 Cyrville Rd";
-const SQUARE_PAYMENT_URL = "https://square.link/u/LuqQu9F8";
 
 function companyPickupAddress() {
   return state.snapshot?.company?.pickupAddress || DEFAULT_PICKUP_ADDRESS;
@@ -207,10 +210,18 @@ function h(value) {
   });
 }
 
+function driverInviteMailto(invite) {
+  if (!invite?.email || !invite?.url) return "";
+  const subject = encodeURIComponent("You’re invited to Rivo");
+  const body = encodeURIComponent(`Hi ${invite.name || "there"},\n\nYou’ve been invited to join Rivo as a driver. Create your password and open the driver app here:\n${invite.url}\n\nThis secure link expires in 7 days.`);
+  return `mailto:${encodeURIComponent(invite.email)}?subject=${subject}&body=${body}`;
+}
+
 function api(path, options = {}) {
   const init = {
     method: options.method || "GET",
     headers: { ...(options.headers || {}) },
+    credentials: "same-origin",
     ...(options.cache ? { cache: options.cache } : {})
   };
   if (options.auth !== false && state.auth?.token) {
@@ -1973,6 +1984,10 @@ function renderOwnerSetup() {
               <label for="setup-company">Company name</label>
               <input class="input" id="setup-company" name="companyName" value="${h(companyName)}" required>
             </div>
+            <div class="field full">
+              <label for="setup-pickup">Primary pickup or depot</label>
+              <input class="input" id="setup-pickup" name="pickupAddress" autocomplete="street-address" placeholder="Street address, city, province" required>
+            </div>
             <div class="field">
               <label for="setup-name">Your name</label>
               <input class="input" id="setup-name" name="name" autocomplete="name">
@@ -1980,6 +1995,18 @@ function renderOwnerSetup() {
             <div class="field">
               <label for="setup-username">Username</label>
               <input class="input" id="setup-username" name="username" autocomplete="username" required>
+            </div>
+            <div class="field">
+              <label for="setup-currency">Currency</label>
+              <select class="select" id="setup-currency" name="currency"><option value="CAD" selected>CAD</option><option value="USD">USD</option></select>
+            </div>
+            <div class="field">
+              <label for="setup-timezone">Time zone</label>
+              <select class="select" id="setup-timezone" name="timeZone"><option value="America/Toronto" selected>Toronto</option><option value="America/Vancouver">Vancouver</option><option value="America/Edmonton">Edmonton</option><option value="America/Winnipeg">Winnipeg</option><option value="America/New_York">New York</option><option value="America/Chicago">Chicago</option><option value="America/Denver">Denver</option><option value="America/Los_Angeles">Los Angeles</option></select>
+            </div>
+            <div class="field full">
+              <label for="setup-support">Support email</label>
+              <input class="input" id="setup-support" name="supportEmail" type="email" autocomplete="email" placeholder="dispatch@yourbusiness.com" required>
             </div>
             <div class="field">
               <label for="setup-password">Password</label>
@@ -2203,7 +2230,8 @@ function renderSettingsHtml() {
   const notifications = company.notifications || {};
   const plans = state.snapshot?.plans || [];
   const planAccess = state.snapshot?.planAccess || plans[0] || {};
-  const status = company.subscriptionStatus === "active" ? "Active" : company.subscriptionStatus === "past_due" ? "Past due" : "Setup";
+  const status = company.subscriptionStatus === "active" ? "Active" : company.subscriptionStatus === "past_due" ? "Past due" : company.subscriptionStatus === "evaluation" ? "14-day evaluation" : "Setup";
+  const readiness = state.snapshot?.runtimeReadiness || { checks: [], readyCount: 0, totalCount: 0, requiredReady: false };
   const timeZones = ["America/Toronto", "America/Vancouver", "America/Edmonton", "America/Winnipeg", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"];
   return `
     <section class="dispatch-view${state.dispatcherView === "settings" ? " active" : ""} dashboard-section view-section" id="settings">
@@ -2242,8 +2270,12 @@ function renderSettingsHtml() {
 
         <div class="settings-stack">
           <div class="panel">
+            <div class="panel-header"><div><p class="eyebrow">Launch readiness</p><h3 class="panel-title">${readiness.requiredReady ? "Core systems ready" : "Setup needs attention"}</h3><p class="panel-subtitle">${h(readiness.readyCount)} of ${h(readiness.totalCount)} production checks are ready.</p></div><span class="status-pill ${readiness.requiredReady ? "green" : "amber"}">${readiness.requiredReady ? "Ready" : "Review"}</span></div>
+            <div class="panel-body"><div class="accounts-checklist">${readiness.checks.map((check) => `<div><strong>${check.ready ? "✓" : "○"} ${h(check.label)}</strong><span>${check.ready ? "Ready" : check.required ? "Required before unattended use" : "Recommended before scaling"}</span></div>`).join("")}</div><p class="settings-copy">Automatic email and separate Google map keys are recommended. Dispatch remains usable with the secure copy/share invitation fallback and the current map configuration.</p><div class="item-actions"><a class="button secondary" href="/api/admin/backup" download>Download operational backup</a><a class="button ghost" href="mailto:hello@floraljet.llc?subject=Rivo%20production%20setup">Get setup help</a></div></div>
+          </div>
+          <div class="panel">
             <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(planAccess.name || company.plan || "Starter")}</h3><p class="panel-subtitle">${planAccess.monthlyPrice ? `$${h(planAccess.monthlyPrice)}/month · ` : ""}Dedicated Rivo workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
-            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">Plan changes are reviewed before billing. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rivo%20billing">Billing support</a></div></div>
+            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">New workspaces begin with a guided 14-day evaluation. Billing is activated by a reviewed Rivo invoice. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rivo%20billing">Billing support</a></div></div>
           </div>
           <div class="panel network-readiness-card"><div class="panel-header"><div><p class="eyebrow">Future network</p><h3 class="panel-title">My Drivers + Rivo Driver</h3><p class="panel-subtitle">The fulfillment model is ready for external network drivers without pretending a marketplace exists today.</p></div><span class="status assigned">Coming later</span></div><div class="panel-body"><div class="fulfillment-choice-preview"><div class="active"><strong>My Drivers</strong><span>Your employed or contracted fleet.</span></div><div><strong>Rivo Driver</strong><span>Quote, accept, track, and platform-fee workflow prepared for a future network.</span></div></div><p class="settings-copy">Until the Rivo network launches, use saved courier partners for third-party coverage.</p><button class="button secondary" data-action="dispatcher-view" data-view="drivers" type="button">Manage courier partners</button></div></div>
           <div class="panel">
@@ -2634,6 +2666,7 @@ function renderDispatcher() {
                 <div><strong>${state.lastInvite.emailSent ? "Invitation email sent" : "Invitation link ready"}</strong><p>${h(state.lastInvite.message)}</p></div>
                 <div class="invite-link-box"><code>${h(state.lastInvite.url)}</code></div>
                 <div class="item-actions">
+                  ${driverInviteMailto(state.lastInvite) ? `<a class="button" href="${h(driverInviteMailto(state.lastInvite))}">Open email draft</a>` : ""}
                   <button class="button" type="button" data-action="share-driver-link" data-share-url="${h(state.lastInvite.url)}">Share invitation</button>
                   <button class="button secondary" type="button" data-action="copy" data-copy="${h(state.lastInvite.url)}">Copy link</button>
                   <a class="button ghost" href="${h(state.lastInvite.url)}" target="_blank" rel="noreferrer">Open test</a>
@@ -4278,6 +4311,8 @@ async function copyDriverInvite(driverId) {
   if (response.snapshot) state.snapshot = response.snapshot;
   state.lastInvite = {
     url: response.inviteUrl,
+    email: response.driver?.email || "",
+    name: response.driver?.name || "",
     emailSent: Boolean(response.emailSent),
     message: response.emailSent
       ? "The driver can open the email and create a password. The same secure link is shown here for verification."
@@ -4305,6 +4340,8 @@ async function updateDriverProfile(form) {
   if (response.identityChanged && response.inviteUrl) {
     state.lastInvite = {
       url: response.inviteUrl,
+      email: response.driver?.email || body.email || "",
+      name: response.driver?.name || "",
       emailSent: Boolean(response.emailSent),
       message: response.emailSent
         ? "The login email changed, so old sessions and links were revoked and a fresh invitation was emailed."
@@ -5097,6 +5134,8 @@ app.addEventListener("submit", async (event) => {
       }
       state.lastInvite = {
         url: response.inviteUrl,
+        email: response.driver?.email || body.email || "",
+        name: response.driver?.name || body.name || "",
         emailSent: Boolean(response.emailSent),
         message: response.emailSent
           ? "The driver received a secure link to create their password. Keep the link below available in case they need it resent."
@@ -5258,7 +5297,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=44").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=45").catch(() => {});
   });
 }
 
@@ -5306,10 +5345,10 @@ function reconcilePublishing(previousSnapshot, nextSnapshot) {
 
 function connectSnapshotStream() {
   stopLiveRefresh();
-  if (!state.auth?.token) return;
+  if (!state.auth?.role) return;
   const generation = state.refreshGeneration;
   const refresh = async () => {
-    if (generation !== state.refreshGeneration || !state.auth?.token) return;
+    if (generation !== state.refreshGeneration || !state.auth?.role) return;
     try {
       const response = await api("/api/me");
       if (generation !== state.refreshGeneration) return;
@@ -5405,11 +5444,6 @@ async function init() {
       }
       state.setupMode = true;
       renderOwnerSetup();
-      return;
-    }
-
-    if (!state.auth?.token) {
-      renderLogin();
       return;
     }
 

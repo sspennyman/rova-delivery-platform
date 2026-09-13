@@ -28,10 +28,9 @@ for (const relativePath of requiredFiles) {
 const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8");
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
 assert.match(appHtml, /id="app"/, "the public root should load the Rivo application shell");
-assert.match(appHtml, /delivery-driver-tracker\.spennyman\.chatgpt\.site[\s\S]*app\.floraljet\.llc/, "the app shell should replace the old alias before rendering");
-assert.match(appHtml, /app\.js\?v=44/, "the public root should load the latest Rivo app bundle");
+assert.match(appHtml, /app\.js\?v=45/, "the public root should load the latest Rivo app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
-assert.match(operationsHtml, /app\.js\?v=44/, "the dispatcher route should load the latest Rivo app bundle");
+assert.match(operationsHtml, /app\.js\?v=45/, "the dispatcher route should load the latest Rivo app bundle");
 
 const hosting = JSON.parse(fs.readFileSync(path.join(root, "dist/.openai/hosting.json"), "utf8"));
 if (!hosting.project_id) {
@@ -55,6 +54,10 @@ assert.match(appSource, /First time here\?/, "the app login should explain drive
 assert.doesNotMatch(appSource, /lead-capture-form|Request demo|Request pilot/, "the app subdomain should not expose a public sales form");
 assert.match(appSource, /Private dispatcher workspace for inbound requests/, "the dispatcher app should include the private accounts workspace");
 assert.match(appSource, /Invite link copied/, "the add-driver flow should expose the invite fallback clearly");
+assert.match(appSource, /Open email draft/, "manual driver invitations should open a complete email draft");
+assert.match(appSource, /Download operational backup/, "dispatchers should be able to export a redacted continuity backup");
+assert.match(appSource, /rivoAuthStateV2/, "browser auth state should use the hardened session marker");
+assert.match(appSource, /credentials: "same-origin"/, "browser requests should include the secure session cookie");
 const drawMapSource = appSource.slice(appSource.indexOf("function drawMap"), appSource.indexOf("function drawCanvasMap"));
 assert.match(drawMapSource, /renderGoogleRoutes/, "configured maps should render address-based route previews");
 assert.match(drawMapSource, /renderOpenMap/, "the live map should retain a reliable keyless GPS fallback");
@@ -215,6 +218,8 @@ const initialWorker = await loadFreshWorker("initial");
 const setupResponse = await initialWorker.default.fetch(setupRequest, env);
 assert.equal(setupResponse.status, 201, "owner setup should save to the attached database");
 assert.equal(setupResponse.headers.get("cache-control"), "no-store", "authentication responses must not be cached");
+assert.match(setupResponse.headers.get("set-cookie") || "", /rivo_session=.*HttpOnly.*Secure.*SameSite=Lax/, "owner setup should issue a secure HttpOnly session cookie");
+assert.match(setupResponse.headers.get("content-security-policy") || "", /frame-ancestors 'none'/, "responses should include the production content-security policy");
 const setupPayload = await setupResponse.json();
 assert.ok(database.row?.payload_json, "attached database should contain the saved Rivo state");
 assert.equal(setupPayload.snapshot.drivers.length, 0, "a fresh production workspace should not seed demo drivers");
@@ -232,6 +237,24 @@ assert.equal(setupPayload.snapshot.proofMedia.configured, true, "the UI should e
 assert.equal(setupPayload.snapshot.planAccess.monthlyPrice, 99, "new workspaces should expose Starter pricing without charging the account");
 assert.equal(setupPayload.snapshot.dispatchAssistant.aiConnected, false, "the rules engine must not be presented as connected generative AI");
 assert.equal(setupPayload.snapshot.analytics.dataSource, "Rivo delivery records", "analytics should describe its source");
+assert.equal(setupPayload.snapshot.company.currency, "CAD", "new customer workspaces should default to Canadian billing");
+assert.equal(setupPayload.snapshot.company.subscriptionStatus, "evaluation", "new customer workspaces should begin a guided evaluation");
+assert.equal(setupPayload.snapshot.runtimeReadiness.billingMode, "manual-invoice", "first-customer billing should stay reviewed and manual");
+
+const setupStatusResponse = await initialWorker.default.fetch(new Request("https://vms.test/api/setup/status"), env);
+const setupStatusPayload = await setupStatusResponse.json();
+assert.deepEqual(Object.keys(setupStatusPayload.company), ["name"], "public setup status must not expose private workspace configuration");
+assert.equal(setupStatusPayload.company.name, "Rivo", "the public sign-in gateway should use the Rivo product brand");
+
+const cookieValue = (setupResponse.headers.get("set-cookie") || "").split(";")[0];
+const cookieSessionResponse = await initialWorker.default.fetch(new Request("https://vms.test/api/me", { headers: { cookie: cookieValue } }), env);
+assert.equal(cookieSessionResponse.status, 200, "secure cookie sessions should authenticate without a persisted bearer token");
+
+const backupResponse = await initialWorker.default.fetch(new Request("https://vms.test/api/admin/backup", { headers: { cookie: cookieValue } }), env);
+assert.equal(backupResponse.status, 200, "dispatchers should be able to download an operational continuity export");
+assert.match(backupResponse.headers.get("content-disposition") || "", /rivo-operational-backup/, "continuity exports should download with a recognizable filename");
+const backupText = await backupResponse.text();
+assert.doesNotMatch(backupText, /passwordHash|passwordSalt|inviteTokenHash|shareToken|webhookTokenHash|"credentials"/, "continuity exports must redact authentication and integration secrets");
 
 const reloadedWorker = await loadFreshWorker("reload");
 const persistedResponse = await reloadedWorker.default.fetch(

@@ -33,7 +33,7 @@ INVITE_FROM_EMAIL=Rivo <drivers@your-verified-domain.com>
 
 The sender domain must be verified with Resend. If email is not configured or delivery fails, the driver is still created and Rivo presents persistent **Share**, **Copy link**, and **Open test** controls so the dispatcher can send the invitation manually without losing it.
 
-Passwords are stored as salted PBKDF2-SHA256 hashes. Login endpoints are rate-limited and authentication responses are marked `no-store`.
+Passwords are stored as salted PBKDF2-SHA256 hashes. Login endpoints are rate-limited, authentication responses are marked `no-store`, and browser sessions use Secure, HttpOnly, SameSite cookies. No bearer credential is persisted in browser storage. If automatic email is unavailable, **Open email draft** prepares the complete invitation in the dispatcher's email app.
 
 ## Dispatch and routes
 
@@ -79,3 +79,7 @@ pnpm run validate
 ```
 
 The validator exercises the driver invitation and email-login lifecycle, password migration, duplicate-account protection, rate limiting, route-preview integration, and the built Sites bundle.
+
+## Customer workspace launch
+
+Each customer receives a dedicated Rivo workspace. `/setup` now captures the customer name, depot, currency, time zone, support email, and owner account, then begins a 14-day guided evaluation. The Settings screen reports production readiness without exposing credentials and provides a redacted operational-continuity backup. Early customers use reviewed manual invoices; there is no customer-facing self-charge control in the app.

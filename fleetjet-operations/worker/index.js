@@ -3,6 +3,7 @@ const DEFAULT_COMPANY_NAME = "Rivo";
 const DEFAULT_PICKUP_ADDRESS = "1675 Cyrville Rd";
 const WIX_PICKUP_NAME = "Cyrville";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
+const SESSION_COOKIE_NAME = "rivo_session";
 const INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 // Cloudflare Workers rejects PBKDF2 iteration counts above 100,000.
 // Keep the configured work factor at the runtime ceiling so account setup,
@@ -755,7 +756,10 @@ async function migrateDb(db) {
     supportEmail: "hello@floraljet.llc",
     plan: "Starter",
     planId: "starter",
-    subscriptionStatus: "setup"
+    subscriptionStatus: "setup",
+    billingMode: "manual-invoice",
+    dataRetentionDays: 730,
+    locationRetentionDays: 90
   };
   for (const [key, value] of Object.entries(companyDefaults)) {
     if (!db.company[key]) {
@@ -1634,6 +1638,7 @@ function snapshot(db, env) {
       from: String(env.COURIER_REQUEST_FROM_EMAIL || "").trim().replace(/^.*<([^>]+)>.*$/, "$1")
     },
     proofMedia: { configured: Boolean(env.PROOF_MEDIA && typeof env.PROOF_MEDIA.put === "function") },
+    runtimeReadiness: runtimeReadiness(db, env),
     drivers: db.drivers.filter((driver) => !driver.archivedAt).map((driver) => publicDriver(driver, { includeLogin: true })),
     courierPartners: db.courierPartners.filter((partner) => !partner.archivedAt).map(publicCourierPartner),
     courierRequests: db.courierRequests.slice(-100).map((courierRequest) => publicCourierRequest(db, courierRequest)),
@@ -1695,11 +1700,29 @@ function createSession(db, user) {
   return session;
 }
 
+function cookieValue(request, name) {
+  const cookieHeader = String(request.headers.get("cookie") || "");
+  for (const part of cookieHeader.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() === name) return decodeURIComponent(part.slice(separator + 1).trim());
+  }
+  return "";
+}
+
+function sessionCookie(token) {
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(String(token || ""))}; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function expiredSessionCookie() {
+  return `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
 function sessionFromRequest(request, db, url) {
   cleanSessions(db);
   const authorization = request.headers.get("authorization") || "";
   const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
-  const token = bearer || request.headers.get("x-session-token") || url.searchParams.get("session") || "";
+  const token = bearer || request.headers.get("x-session-token") || cookieValue(request, SESSION_COOKIE_NAME) || "";
   if (!token) return null;
   const session = db.sessions.find((item) => item.token === token) || null;
   if (session?.role === "driver" && !driverById(db, session.driverId)) return null;
@@ -1734,6 +1757,31 @@ function mapsConfig(env = {}) {
     configured: Boolean(apiKey),
     apiKey,
     mapId
+  };
+}
+
+function runtimeReadiness(db, env = {}) {
+  const browserKey = String(env.GOOGLE_MAPS_BROWSER_API_KEY || "").trim();
+  const serverKey = String(env.GOOGLE_MAPS_SERVER_API_KEY || "").trim();
+  const legacyKey = String(env.GOOGLE_MAPS_API_KEY || "").trim();
+  const encryptionKey = String(env.INTEGRATION_ENCRYPTION_KEY || "").trim();
+  const checks = [
+    { id: "database", label: "Persistent database", ready: hasPersistentDatabase(env), required: true },
+    { id: "proof-media", label: "Proof media storage", ready: Boolean(env.PROOF_MEDIA && typeof env.PROOF_MEDIA.put === "function"), required: true },
+    { id: "owner", label: "Owner account", ready: Boolean(db.ownerAccount?.username), required: true },
+    { id: "invite-email", label: "Automatic driver email", ready: Boolean(String(env.RESEND_API_KEY || "").trim() && String(env.INVITE_FROM_EMAIL || "").trim()), required: false },
+    { id: "browser-maps", label: "Dispatcher map", ready: Boolean(browserKey || legacyKey), required: true },
+    { id: "server-maps", label: "Route optimization", ready: Boolean(serverKey || legacyKey), required: true },
+    { id: "split-map-keys", label: "Separate browser and server map keys", ready: Boolean(browserKey && serverKey), required: false },
+    { id: "integration-encryption", label: "Integration credential encryption", ready: encryptionKey.length >= 24, required: true },
+    { id: "backup", label: "Operational continuity export", ready: true, required: true }
+  ];
+  return {
+    checks,
+    requiredReady: checks.filter((check) => check.required).every((check) => check.ready),
+    readyCount: checks.filter((check) => check.ready).length,
+    totalCount: checks.length,
+    billingMode: String(db.company?.billingMode || "manual-invoice")
   };
 }
 
@@ -1992,6 +2040,34 @@ function releaseCourierRequestTrips(db, courierRequest) {
   }
 }
 
+function operationalBackup(db) {
+  const sensitiveKeys = new Set([
+    "password", "passwordhash", "passwordsalt", "passworditerations", "passwordalgorithm",
+    "token", "sharetoken", "invitetokenhash", "webhooktokenhash", "credentials", "key"
+  ]);
+  const redact = (value) => {
+    if (Array.isArray(value)) return value.map(redact);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !sensitiveKeys.has(key.toLowerCase()))
+      .map(([key, nested]) => [key, redact(nested)]));
+  };
+  return {
+    format: "rivo-operational-continuity",
+    formatVersion: 1,
+    exportedAt: nowIso(),
+    redactions: ["password material", "sessions", "invitation tokens", "customer share tokens", "integration credentials", "webhook secrets", "proof-media access tokens and object keys"],
+    company: redact(db.company || {}),
+    owner: db.ownerAccount ? redact({ username: db.ownerAccount.username, name: db.ownerAccount.name, createdAt: db.ownerAccount.createdAt, updatedAt: db.ownerAccount.updatedAt }) : null,
+    drivers: redact(db.drivers || []),
+    courierPartners: redact(db.courierPartners || []),
+    courierRequests: redact(db.courierRequests || []),
+    trips: redact(db.trips || []),
+    leads: redact(db.leads || []),
+    integrations: redact((db.integrations?.connections || []).map(({ credentials, webhookTokenHash, ...connection }) => connection))
+  };
+}
+
 function sendJson(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
     status,
@@ -2038,6 +2114,18 @@ function unauthorized(message = "Login required.") {
 
 function notFound() {
   return sendJson({ error: "Not found" }, 404);
+}
+
+function withSecurityHeaders(response, url) {
+  const headers = new Headers(response.headers);
+  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self' https://maps.googleapis.com https://*.googleapis.com https://tiles.openfreemap.org https://*.openfreemap.org; font-src 'self' data: https://fonts.gstatic.com; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob: https:; object-src 'none'; script-src 'self' https://maps.googleapis.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; worker-src 'self' blob:; upgrade-insecure-requests");
+  headers.set("Permissions-Policy", "camera=(self), geolocation=(self), microphone=()");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "DENY");
+  if (url.protocol === "https:") headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  if (!url.pathname.startsWith("/api/") && url.pathname !== "/events") headers.set("X-Robots-Tag", "noindex, nofollow");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function sendSse(client, event, data) {
@@ -2656,7 +2744,7 @@ async function handleApi(request, env, url) {
 
   if (method === "GET" && url.pathname === "/api/setup/status") {
     return authJson({
-      company: companyForEnv(db, env),
+      company: { name: DEFAULT_COMPANY_NAME },
       setupEnabled: setupEnabled(env),
       ownerCreated: Boolean(db.ownerAccount?.username)
     });
@@ -2738,11 +2826,29 @@ async function handleApi(request, env, url) {
     const password = String(body.password || "");
     const name = String(body.name || username || "Owner").trim();
     const companyName = String(body.companyName || DEFAULT_COMPANY_NAME).trim();
+    const pickupAddress = String(body.pickupAddress || DEFAULT_PICKUP_ADDRESS).trim();
+    const currency = String(body.currency || "CAD").trim().toUpperCase();
+    const timeZone = String(body.timeZone || "America/Toronto").trim();
+    const supportEmail = normalizeEmail(body.supportEmail || "hello@floraljet.llc");
     if (username.length < 3) return badRequest("Username must be at least 3 characters.");
     if (password.length < 8) return badRequest("Password must be at least 8 characters.");
+    if (companyName.length < 2) return badRequest("Company name is required.");
+    if (pickupAddress.length < 5) return badRequest("Enter a valid pickup or depot address.");
+    if (!["CAD", "USD"].includes(currency)) return badRequest("Choose CAD or USD.");
+    if (!timeZone.includes("/")) return badRequest("Choose a valid time zone.");
+    if (!validEmail(supportEmail)) return badRequest("Enter a valid support email.");
+    const evaluationStartedAt = nowIso();
     db.company = {
       ...db.company,
-      name: companyName || DEFAULT_COMPANY_NAME
+      name: companyName || DEFAULT_COMPANY_NAME,
+      pickupAddress,
+      currency,
+      timeZone,
+      supportEmail,
+      subscriptionStatus: "evaluation",
+      evaluationStartedAt,
+      evaluationEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      billingMode: "manual-invoice"
     };
     const ownerAccount = {
       username,
@@ -2759,7 +2865,7 @@ async function handleApi(request, env, url) {
     return authJson({
       session: publicSession(nextSession),
       snapshot: nextSnapshot
-    }, 201);
+    }, 201, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
 
   if (method === "POST" && url.pathname === "/api/auth/login") {
@@ -2802,7 +2908,7 @@ async function handleApi(request, env, url) {
     return authJson({
       session: publicSession(nextSession),
       snapshot: nextSnapshot
-    });
+    }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
 
   if (method === "POST" && url.pathname === "/api/auth/owner-recovery") {
@@ -2831,7 +2937,7 @@ async function handleApi(request, env, url) {
     await writeDb(db, env);
     const nextSnapshot = snapshot(db, env);
     broadcastSnapshot(db, env);
-    return authJson({ session: publicSession(nextSession), snapshot: nextSnapshot });
+    return authJson({ session: publicSession(nextSession), snapshot: nextSnapshot }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
 
   if (method === "GET" && url.pathname === "/api/auth/invite") {
@@ -2869,14 +2975,14 @@ async function handleApi(request, env, url) {
     return authJson({
       session: publicSession(nextSession),
       snapshot: driverSnapshot(db, env, driver.id)
-    });
+    }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
 
   if (method === "POST" && url.pathname === "/api/auth/logout") {
-    if (!session) return authJson({ ok: true });
+    if (!session) return authJson({ ok: true }, 200, { "Set-Cookie": expiredSessionCookie() });
     db.sessions = (db.sessions || []).filter((item) => item.token !== session.token);
     await writeDb(db, env);
-    return authJson({ ok: true });
+    return authJson({ ok: true }, 200, { "Set-Cookie": expiredSessionCookie() });
   }
 
   if (method === "GET" && url.pathname === "/api/me") {
@@ -2884,7 +2990,7 @@ async function handleApi(request, env, url) {
     const nextSnapshot = session.role === "driver"
       ? driverSnapshot(db, env, session.driverId)
       : snapshot(db, env);
-    return authJson({ session: publicSession(session), snapshot: nextSnapshot });
+    return authJson({ session: publicSession(session), snapshot: nextSnapshot }, 200, { "Set-Cookie": sessionCookie(session.token) });
   }
 
   if (method === "GET" && url.pathname === "/api/maps/config") {
@@ -2894,6 +3000,15 @@ async function handleApi(request, env, url) {
   if (method === "GET" && url.pathname === "/api/bootstrap") {
     if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
     return sendJson(snapshot(db, env));
+  }
+
+  if (method === "GET" && url.pathname === "/api/admin/backup") {
+    if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const filenameDate = nowIso().slice(0, 10);
+    return sendJson(operationalBackup(db), 200, {
+      "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="rivo-operational-backup-${filenameDate}.json"`
+    });
   }
 
   if (method === "PATCH" && url.pathname === "/api/company") {
@@ -4384,24 +4499,28 @@ export default {
     if (APP_HOSTING_ALIASES.has(url.hostname) || APP_HOSTING_ALIASES.has(forwardedHost)) {
       url.protocol = "https:";
       url.hostname = APP_CANONICAL_HOST;
-      return new Response(null, {
+      return withSecurityHeaders(new Response(null, {
         status: 308,
         headers: {
           "Cache-Control": "public, max-age=3600",
           "Location": url.toString()
         }
-      });
+      }), url);
     }
     try {
+      let response;
       if (url.pathname.startsWith("/api/")) {
-        return await handleApi(request, env, url);
+        response = await handleApi(request, env, url);
+      } else if (url.pathname === "/events") {
+        response = sendJson({ error: "Live event streams have been replaced by polling." }, 410);
+      } else if (url.pathname === "/robots.txt") {
+        response = new Response("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
+      } else {
+        response = await serveStatic(request, env, url);
       }
-      if (url.pathname === "/events") {
-        return sendJson({ error: "Live event streams have been replaced by polling." }, 410);
-      }
-      return await serveStatic(request, env, url);
+      return withSecurityHeaders(response, url);
     } catch (error) {
-      return sendJson({ error: error.message || "Server error" }, error?.code === "STATE_CONFLICT" ? 409 : 500);
+      return withSecurityHeaders(sendJson({ error: error.message || "Server error" }, error?.code === "STATE_CONFLICT" ? 409 : 500), url);
     }
   }
 };
