@@ -75,8 +75,8 @@ html[data-theme] img[src*="rivo-pinwheel.svg"]{filter:none!important}
 html[data-theme=dark] img[src*="rivo-pinwheel.svg"]{content:url('/assets/rivo-pinwheel-on-dark.svg?v=103')}
 html[data-theme]{--accent:#91bfe8;--blue:#91bfe8;--blue-dark:#bad9f0}
 html[data-theme=light]{--accent:#245b85;--blue:#245b85;--blue-dark:#194563;--rb:#245b85}
-html[data-theme=light] .button:not(.secondary):not(.danger){background:#245b85!important;border-color:#245b85!important;color:#fff!important}
-html[data-theme=light] .button:not(.secondary):not(.danger):not(:disabled):hover{background:#194563!important;border-color:#194563!important}
+html[data-theme=light] .button:not(.secondary):not(.danger):not(.ghost):not(.subtle):not(.success):not(.warning){background:#245b85!important;border-color:#245b85!important;color:#fff!important}
+html[data-theme=light] .button:not(.secondary):not(.danger):not(.ghost):not(.subtle):not(.success):not(.warning):not(:disabled):hover{background:#194563!important;border-color:#194563!important}
 
 /* The workspace logo wrapper must not monochrome its coloured child image. */
 html[data-theme] .app-shell .brand-mark,html[data-theme] .app-shell .brand-mark img{filter:none!important}

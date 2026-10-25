@@ -16,7 +16,7 @@ This does not run while the dashboard is closed. Existing webhook connections re
 
 A small Render cron service could invoke a dedicated authenticated import endpoint every minute without moving the website or operational records. Before activation:
 
-1. Confirm the correct Render workspace. Discovery currently returned My Workspace under aajjones99@gmail.com; ownership for Rivo has not been confirmed.
+1. Confirm the correct Render workspace. Discovery currently returned My Workspace under aajjones99@gmail.com; the owner was unsure whether it is the Rivo account, so no resources were inspected or changed.
 2. Implement a dedicated scoped scheduler credential and endpoint. It must grant only order import for the selected workspace, never reuse an owner password or login session.
 3. Add a durable per-workspace import lease, bounded source requests and safe retry behavior. The existing optimistic database version check protects against lost updates, but does not prevent two schedulers from making duplicate upstream requests.
 4. Verify source idempotence, active-route preservation, failure recovery, no customer emails, and simultaneous driver/dispatcher writes. Run one real sync before scheduling.
@@ -37,7 +37,7 @@ Do not run production on the old Node server or a transient filesystem.
 
 ## Launch blockers separate from hosting
 
-- Owner sign-in: the supplied password was not accepted. No password was changed; owner recovery awaits user direction.
+- Owner sign-in: the supplied password was not accepted. No password was changed; the owner requested leaving login unchanged, so no recovery was performed.
 - Google Maps: billing activation remains deferred by the owner. Open-map fallback is available, but Google routing must be activated and verified before being advertised as working.
 - App stores: no Apple Developer Program or Google Play Console account is enrolled. Current iOS is a temporary personal development installation; Android AAB is unsigned. Enrollment, account verification, release signing, store declarations, review access and a measured background-GPS drive are required before submission.
 
