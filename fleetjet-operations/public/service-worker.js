@@ -1,8 +1,8 @@
-const CACHE_NAME = "rivo-operations-v103";
+const CACHE_NAME = "rivo-operations-v104";
 const APP_SHELL = [
   "/order-window.js?v=103",
   "/appearance.js?v=103",
-  "/appearance.css?v=103",
+  "/appearance.css?v=104",
   "/assets/rivo-pinwheel.svg?v=103",
   "/fonts/vend-sans-regular.ttf",
   "/fonts/vend-sans-semibold.ttf",
