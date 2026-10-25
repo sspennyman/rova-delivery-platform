@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import vm from "node:vm";
+const source = fs.readFileSync("public/app.js", "utf8");
+const names = ["googleStopLocation", "googleRouteRequest", "googleMarkerStops", "googleCoordinate", "googleWaypointPosition", "addGoogleMarker"];
+const pieces = names.map(name => {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1);
+  const end = source.indexOf("\n}\n", start) + 2;
+  return source.slice(start, end);
+});
+const markers = [];
+const sandbox = { state: { mapsConfig: {} }, google: { maps: { Marker: class { constructor(options) { assert.equal(typeof options.position, "object", "address strings must never reach Marker"); markers.push(options); } } } }, Date };
+vm.createContext(sandbox);
+vm.runInContext(pieces.join("\n"), sandbox);
+const stops = [{ label: "Depot", address: "100 Test St" }, { label: "Customer", address: "200 Test St" }];
+const route = { legs: [{ startLocation: { lat: 45.4, lng: -75.7 }, endLocation: { lat: () => 45.5, lng: () => -75.6 } }] };
+const view = { markers: [] };
+stops.forEach((stop, index) => sandbox.addGoogleMarker(view, {}, {}, {}, stop, String(index), { position: sandbox.googleWaypointPosition(route, stop, index) }));
+assert.equal(markers.length, 2, "both address-only stops receive geocoded route markers");
+assert.equal(markers[1].position.lat, 45.5);
+assert.equal(sandbox.googleCoordinate({latLng:{lat:45.5,lng:-75.6}}).lat,45.5);
+sandbox.addGoogleMarker(view, {}, {}, {}, stops[0], "S");
+assert.equal(markers.length, 2, "an unresolved address is safely skipped, not a failed route");
+assert.ok(sandbox.googleRouteRequest(stops).fields.includes("legs"));
+assert.throws(() => sandbox.googleRouteRequest(Array(28).fill(stops[0])), /25 intermediate/, "route is never silently truncated");
+assert.match(source, /if \(view.seq !== seq \|\| document.getElementById/, "stale route responses cannot overwrite current selection");
+console.log("Google route-preview regression checks passed: address markers, LatLng conversion, missing coordinates, waypoint limit and stale response guard.");

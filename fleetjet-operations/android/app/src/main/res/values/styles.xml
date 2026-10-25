@@ -1,0 +1,19 @@
+<resources>
+    <color name="rivo_background">#050506</color>
+    <style name="RivoTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#91BFE8</item>
+        <item name="android:windowBackground">@color/rivo_background</item>
+        <item name="android:statusBarColor">@color/rivo_background</item>
+        <item name="android:navigationBarColor">@color/rivo_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="RivoLightTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#245B85</item>
+        <item name="android:windowBackground">#F8FAFC</item>
+        <item name="android:statusBarColor">#F8FAFC</item>
+        <item name="android:navigationBarColor">#F8FAFC</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

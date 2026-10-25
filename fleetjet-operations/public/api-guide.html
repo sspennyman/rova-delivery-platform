@@ -1,0 +1,33 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rivo API guide</title><link rel="stylesheet" href="/design-system.css?v=96"><style>body{margin:0;background:#09090b;color:#eee;font:16px/1.65 system-ui}main{max-width:860px;margin:auto;padding:48px 24px}a{color:#8fbaff}h1{font-size:42px;line-height:1.1}h2{margin-top:40px}pre{overflow:auto;padding:20px;background:#161619;border:1px solid #303035;border-radius:12px}code{font-family:ui-monospace,monospace}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:12px;border-bottom:1px solid #303035}p{color:#bbb}</style></head><body><main>
+<a href="/operations">← Back to Rivo</a><p>DEVELOPERS · API v1</p><h1>Connect your software to Rivo.</h1><p>Create orders, update queued deliveries, read delivery progress, and look up your driver roster. API access is available to every workspace.</p>
+<h2>1. Create a key</h2><p>Sign in as the workspace owner, open Connections, and choose Create API key. Select only the permissions your integration needs. Copy the key once; store it in your server or automation tool’s secret storage. Never put it in a public website, browser script, or URL. Keys created in the app expire after 90 days. Create a replacement before expiry, update your integration, then revoke the old key.</p>
+<h2>2. Send an order</h2><p>Use an HTTP request step in Zapier, Make, n8n, or your own server. These are generic HTTP integrations, not installed marketplace apps. Set Authorization to Bearer followed by your key, and Content-Type to application/json.</p>
+<pre><code>curl https://app.floraljet.llc/api/v1/orders \
+  -H "Authorization: Bearer $RIVO_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "externalId": "store-order-1001",
+    "customerName": "Example customer",
+    "phone": "+16135550100",
+    "pickup": "100 Example Street, Ottawa",
+    "destination": "200 Example Avenue, Ottawa"
+  }'</code></pre>
+<p>New orders enter the dispatch queue. Keep externalId unique across your workspace, including across API keys. Repeating the same request returns the same order without creating duplicates. Reusing that ID with different data returns 409; edit the queued order with PATCH instead. Phone is optional; the other four fields are required.</p>
+<h2>Endpoints and permissions</h2><table><thead><tr><th>Request</th><th>Permission</th></tr></thead><tbody>
+<tr><td>GET /api/v1/capabilities</td><td>Any valid key</td></tr>
+<tr><td>GET /api/v1/orders</td><td>orders:read</td></tr>
+<tr><td>GET /api/v1/orders/:id</td><td>orders:read</td></tr>
+<tr><td>POST /api/v1/orders</td><td>orders:write</td></tr>
+<tr><td>PATCH /api/v1/orders/:id</td><td>orders:write</td></tr>
+<tr><td>GET /api/v1/drivers</td><td>drivers:read</td></tr>
+</tbody></table>
+<p>Lists return data, total, and nextOffset. Use ?limit=50&amp;offset=0 and follow nextOffset until null; the maximum page size is 100. Orders can be filtered by ?status=queued or ?status=active. Read an individual order for current status, driver assignment, completion time, and distance. The roster returns only ID, name, status, and vehicle.</p>
+<pre><code>curl https://app.floraljet.llc/api/v1/orders/ORDER_ID \
+  -X PATCH -H "Authorization: Bearer $RIVO_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"destination":"300 Example Road, Ottawa"}'</code></pre>
+<p>PATCH accepts customerName, phone, pickup, and destination. Only queued orders can be edited. Dispatch and proof of delivery remain in Rivo. Active delivery routes cannot be changed through this API. Personal mileage, location history, passwords, and proof-media access tokens are excluded.</p>
+<h2>Delivery updates and errors</h2><p>Poll the order endpoint for status updates, for example once per minute while a delivery is active. Outgoing webhooks and a change feed are not available yet. The existing Universal webhook receives orders; it does not send status updates.</p>
+<p>201 means created; 200 means read, updated, or a successful duplicate replay. 400 means invalid input; 401 means an invalid, expired, or revoked key; 403 means a missing permission; 404 means the resource was not found in this workspace; 409 means a conflict. Read the error field. On a concurrent-write conflict, re-read and retry with backoff. Retry network errors and 5xx responses with exponential backoff and the same externalId. Respect Retry-After if a hosting limit returns 429.</p>
+<h2>Existing store connections</h2><p>Wix, Shopify, and WooCommerce import orders with your store credentials. Universal webhook accepts JSON orders from other systems. Each provider still requires an account and appropriate permission; connecting Rivo cannot bypass another service’s access rules.</p>
+</main></body></html>

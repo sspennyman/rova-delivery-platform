@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "rivo-pinwheel.svg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

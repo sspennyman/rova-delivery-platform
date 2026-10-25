@@ -582,8 +582,8 @@ a {
   display: none;
 }
 
-.manage-summary:hover {
-  background: #f8fafc;
+@media (hover: hover) and (pointer: fine) {
+  .manage-summary:hover { background: var(--surface-strong); }
 }
 
 .manage-summary .panel-subtitle {
@@ -606,8 +606,8 @@ a {
 
 .manage-panel[open] .summary-control {
   transform: rotate(45deg);
-  background: #eaf1ff;
-  color: var(--blue-dark);
+  background: var(--surface-strong);
+  color: var(--blue);
 }
 
 .manage-panel[open] .manage-summary {
@@ -2237,8 +2237,8 @@ tr:last-child td {
 
 .workspace-switcher button.active,
 .workspace-switcher button:hover {
-  background: #eaf1ff;
-  color: var(--blue-dark);
+  background: var(--surface-strong);
+  color: var(--blue);
 }
 
 .staff-flow {
@@ -3937,6 +3937,30 @@ body {
   grid-template-columns: 224px minmax(0, 1fr);
 }
 
+@media (max-width: 1050px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+}
+
+[hidden] { display: none !important; }
+
+.action-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  padding: 24px;
+  color: var(--text);
+  background: #fff;
+  box-shadow: 0 24px 80px #0b102040;
+}
+.action-dialog::backdrop { background: #0b102080; }
+.action-dialog h2 { margin: 0 0 12px; }
+.action-dialog p { line-height: 1.5; }
+.action-dialog label { display: block; margin: 16px 0 8px; }
+.action-dialog textarea { width: 100%; font-size: 16px; }
+.action-dialog-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+
 .sidebar {
   gap: 14px;
   padding: 20px 14px;
@@ -5328,6 +5352,38 @@ body {
 .owner-recovery-heading strong,
 .owner-recovery-heading span {
   display: block;
+}
+
+/* Task-focused dispatch: one work surface at a time, with optional map. */
+.dashboard-board { display: flex; flex-wrap: wrap; align-items: stretch; width: 100%; }
+.dashboard-board > .dashboard-widget { display: flex; flex-direction: column; flex: 1 1 calc(50% - 7px); min-width: 0; }
+.dashboard-board > .dashboard-widget-wide { flex-basis: 100%; }
+.dashboard-widget > .panel,
+.dashboard-widget > .operations-orders,
+.dashboard-widget > .dashboard-widget-stack { flex: 1; width: 100%; min-width: 0; }
+.dashboard-widget > .operations-orders > .panel { height: 100%; }
+@media (max-width: 980px) {
+  .dashboard-board > .dashboard-widget { flex-basis: 100%; }
+}
+.dispatch-pane-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 20px; }
+.dispatch-pane-tabs .button { min-height: 44px; font-size: 14px; }
+.pane-count { border-radius: 20px; padding: 2px 7px; background: rgba(127,127,127,.15); }
+.orders-panel .section-heading.compact-heading { display: none; }
+.orders-panel .review-heading { display: flex !important; }
+.orders-panel .bulk-action-bar.has-selection { position: sticky; top: 8px; z-index: 20; box-shadow: 0 5px 20px #10244818; }
+.orders-panel .bulk-more-menu { min-width: 220px; }
+.orders-panel .bulk-more-menu .bulk-rate-control { display: grid; gap: 6px; }
+.dashboard-board .route-preview-panel { position: static; }
+@media (max-width: 640px) {
+  .dispatch-pane-tabs { gap: 4px; }
+  .order-filter-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .order-filter-toolbar .count-chip { justify-self: start; }
+  .order-filter-field { min-width: 0; }
+  .dispatch-pane-tabs .button { flex: 1 1 40%; }
+  .orders-panel .bulk-action-bar.has-selection { top: 0; padding: 12px; }
+  .orders-panel .bulk-driver-control { flex: 1 1 100%; }
+  .orders-panel .bulk-actions { display: flex; flex-wrap: wrap; width: 100%; }
+  .orders-panel .bulk-actions > .button { flex: 1; }
 }
 
 .owner-recovery-heading strong {

@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import {tripMapData,tripMapHtml,tripPlaceLabel} from "../public/trip-maps.js";
+import {ingestPoints,mileageSnapshot} from "../worker/mileage.js";
+
+const old={id:"old",start:{lng:-75.7,lat:45.4},end:{lng:-75.69,lat:45.41},from:"GPS: 45.40000, -75.70000"};
+assert.equal(tripMapData(old).recorded,false,"two endpoints must not become an invented route");
+assert.equal(tripMapData(old).points.length,2);
+assert.match(tripMapHtml(old),/older route not saved/);
+assert.equal(tripPlaceLabel(old.from,"Start location"),"Start location");
+assert.equal(tripPlaceLabel("Depot","Start location"),"Depot");
+assert.match(tripMapHtml({id:'<script>',source:'manual'}),/No GPS map/);
+assert.doesNotMatch(tripMapHtml({id:'<script>'}),/<script>/,"trip IDs are escaped");
+assert.equal(tripMapData({previewPath:[[null,null],[Infinity,45],[-75,45],[-74,46]]}).path.length,2,"malformed points cannot be mistaken for valid coordinates");
+const now=Date.now(),base=now-12_000_000,deviceId="map-test-device";
+const db={drivers:[{id:"owner",name:"Fixture"},{id:"other"}]};
+mileageSnapshot(db,"owner");
+Object.assign(db.mileageTracking.owner,{enabled:true,enabledAt:new Date(base-1000).toISOString(),deviceId,source:"ios"});
+const points=Array.from({length:600},(_,i)=>({seq:i+1,at:base+i*20000,lat:45.4+i*.0002,lng:-75.7,accuracy:5,speed:5}));
+for(let i=0;i<points.length;i+=100)ingestPoints(db,"owner",{deviceId,points:points.slice(i,i+100)},now);
+const trip=db.mileageTrips[0];
+assert.ok(trip.previewPath.length <=128 && trip.previewPath.length>2,"preview storage remains bounded for long drives");
+assert.deepEqual(trip.previewPath[0],[-75.7,45.4],"sampling preserves the actual start");
+assert.deepEqual(trip.previewPath.at(-1),[-75.7,Number(points.at(-1).lat.toFixed(6))],"sampling preserves the latest endpoint");
+assert.ok(trip.distanceKm>13.31&&trip.distanceKm<13.33,"sampling does not change the original GPS distance calculation");
+assert.match(tripMapHtml(trip),/Recorded GPS preview/);
+assert.equal(mileageSnapshot(db,"other").trips.length,0,"preview paths remain driver-private");
+assert.equal(mileageSnapshot(db).trips,undefined);
+console.log("Trip map checks passed: real endpoints, no fabricated historical routes, bounded recorded samples, unchanged distance, escaping and driver privacy.");

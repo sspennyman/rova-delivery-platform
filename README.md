@@ -1,14 +1,10 @@
-# Rova Delivery Platform
+# Rivo delivery platform
 
-Rova is a delivery operations platform for businesses using in-house drivers, third-party couriers, or both.
+Rivo brings dispatch, multi-stop routes, driver tracking, delivery proof and business mileage into one workspace.
 
-This repository contains two deployable projects:
+- `rova-marketing/`: public website at https://floraljet.llc
+- `fleetjet-operations/`: operations app at https://app.floraljet.llc, with iPhone and Android companion source.
 
-- `rova-marketing/` — the public website, product walkthrough, live demo, pricing, and lead-capture pages.
-- `fleetjet-operations/` — the dispatcher, driver, customer-tracking, routing, proof-of-delivery, mileage, and commerce-integration application.
+The original folder names are retained for compatibility. Production is deployed through Sites. This GitHub repository mirrors the source; a GitHub commit alone does not deploy production.
 
-## Local development
-
-See `fleetjet-operations/README.md` for application setup, environment variables, local startup, and validation instructions. Each project has its own `package.json`, lockfile, build script, and Sites hosting configuration.
-
-Environment values belong in local `.env` files or the deployment platform's secret store. Only the placeholder-only `.env.example` file is committed.
+See the operations README and companion READMEs for build and validation commands. A local build does not establish physical GPS accuracy or app-store availability. Secrets, customer records, signing keys and generated builds stay outside this repository.

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {outsideDailyOrderWindow} from '../public/order-window.js';
+const now=Date.now(), recent=new Date(now-3600000).toISOString(), old=new Date(now-25*3600000).toISOString();
+const trips=[{id:'recent',status:'queued',source:{system:'wix',createdDate:recent}}, {id:'old-import',status:'queued',importedAt:new Date().toISOString(),source:{system:'wix',createdDate:old}}, {id:'manual',status:'queued',source:{system:'manual',createdDate:old}}, {id:'active',status:'active',startedAt:old,source:{system:'wix',createdDate:old}}, {id:'completed',status:'completed',proof:{photo:true},source:{system:'wix',createdDate:old}}];
+const sandbox={Date,state:{snapshot:{integrations:{connections:[]}},operationsPane:'orders'},outsideDailyOrderWindow,getTrips:()=>trips,isNonDeliveryOrder:()=>false,getDrivers:()=>[],h:x=>x,relativeTime:()=>'',bulkOrderToolbarHtml:()=>'',orderFilterToolbarHtml:()=>'',queuedOrderItem:t=>`<article>${t.id}</article>`};
+vm.createContext(sandbox);
+const src=fs.readFileSync('public/app.js','utf8');
+for(const name of ['queuedTrips','activeTrips','channelOrdersPanel'])vm.runInContext(src.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0],sandbox);
+assert.deepEqual(Array.from(sandbox.queuedTrips(),x=>x.id),['recent','manual'],'recent import time cannot resurrect old Wix orders');
+assert.deepEqual(Array.from(sandbox.activeTrips(),x=>x.id),['active'],'ongoing deliveries are preserved');
+const daily=sandbox.channelOrdersPanel(trips);assert.ok(daily.includes('<article>recent</article>'));assert.ok(!daily.includes('<article>old-import</article>'));assert.ok(daily.includes('past 24 hours'));
+sandbox.state.operationsPane='history';const history=sandbox.channelOrdersPanel(trips);assert.ok(history.includes('<article>old-import</article>'));assert.ok(history.includes('<article>completed</article>'));assert.ok(!history.includes('<article>active</article>'));
+assert.deepEqual(trips[4].proof,{photo:true});
+console.log('Daily dashboard passed: stale imports excluded from queue/counts, manual work and active routes retained, old records available in History without mutation.');

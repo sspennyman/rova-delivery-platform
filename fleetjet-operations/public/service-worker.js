@@ -1,10 +1,23 @@
-const CACHE_NAME = "rivo-operations-v46";
+const CACHE_NAME = "rivo-operations-v103";
 const APP_SHELL = [
+  "/order-window.js?v=103",
+  "/appearance.js?v=103",
+  "/appearance.css?v=103",
+  "/assets/rivo-pinwheel.svg?v=103",
+  "/fonts/vend-sans-regular.ttf",
+  "/fonts/vend-sans-semibold.ttf",
+  "/design-system.css?v=103",
   "/",
   "/index.html",
-  "/styles.css?v=45",
-  "/app.js?v=45",
-  "/canonical-host.js?v=46",
+  "/styles.css?v=103",
+  "/app.js?v=103",
+  "/order-fulfillment.js?v=103",
+  "/assignment-alerts.js?v=103",
+  "/mileage.js?v=103",
+  "/trip-maps.js?v=103",
+  "/mileage.css?v=103",
+  "/workspace.css?v=103",
+  "/canonical-host.js?v=103",
   "/assets/rova-mark.svg",
   "/assets/rivo-logo.png",
   "/manifest.webmanifest",
@@ -52,4 +65,24 @@ self.addEventListener("fetch", (event) => {
       })
       .catch(() => caches.match(event.request))
   );
+});
+
+self.addEventListener("push",event=>{
+  let data={};
+  try {data=event.data?.json() || {};} catch {}
+  event.waitUntil(self.registration.showNotification(String(data.title || "Rivo orders"),{
+    body:String(data.body || "Your assigned orders have changed. Open Rivo to see your route."),
+    icon:"/icons/icon-192.png",badge:"/icons/icon-192.png",tag:String(data.tag || "rivo-assignment"),
+    data:{url:"/#today"}
+  }));
+});
+self.addEventListener("notificationclick",event=>{
+  event.notification.close();
+  event.waitUntil((async()=>{
+    const target=new URL("/#today",self.location.origin).href;
+    const tabs=await self.clients.matchAll({type:"window",includeUncontrolled:true});
+    const tab=tabs.find(client=>new URL(client.url).origin === self.location.origin);
+    if (tab) {await tab.navigate(target);await tab.focus();}
+    else await self.clients.openWindow(target);
+  })());
 });

@@ -1,0 +1,10 @@
+// Keep generated Android build products off synced Documents folders. iCloud
+// conflict copies can otherwise produce duplicate .dex classes. Source and the
+// private signing key stay in place; only generated output moves.
+def outputRoot = System.getenv('RIVO_ANDROID_BUILD_ROOT')
+if (!outputRoot || !new File(outputRoot).isAbsolute() || outputRoot == '/') {
+    throw new GradleException('Set RIVO_ANDROID_BUILD_ROOT to an absolute task-specific build directory.')
+}
+gradle.beforeProject { project ->
+    project.layout.buildDirectory.set(new File(outputRoot, project.name))
+}

@@ -1,9 +1,13 @@
+import {outsideDailyOrderWindow} from './order-window.js?v=103';
+import { createMileageUI } from "./mileage.js?v=103";
+import { createAssignmentAlerts } from "./assignment-alerts.js?v=103";
+import { isNonDeliveryOrder, fulfillmentMethodForTrip } from "./order-fulfillment.js?v=103";
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 const AUTH_STORAGE_KEY = "rivoAuthStateV2";
 const LEGACY_AUTH_STORAGE_KEY = "deliveryAuthSession";
 const DASHBOARD_LAYOUT_STORAGE_KEY = "rivoDispatcherDashboardLayoutV3";
-const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings"]);
+const DISPATCHER_VIEWS = new Set(["operations", "drivers", "analytics", "channels", "accounts", "reports", "settings", "my-mileage"]);
 const DASHBOARD_WIDGETS = [
   { id: "overview", label: "Daily overview", defaultWidth: "wide" },
   { id: "issues", label: "Delivery issues", defaultWidth: "wide" },
@@ -92,6 +96,10 @@ const state = {
   editingCourierId: "",
   courierRequestTripIds: [],
   selectedOrderIds: new Set(),
+  routeDraftIds: [],
+  routeDraftPlan: null,
+  routeDraftLoading: false,
+  routeDraftError: "",
   selectedActiveTripIds: new Set(),
   orderQuery: "",
   orderFilter: "all",
@@ -101,7 +109,13 @@ const state = {
   optimizerLoading: false,
   lastSnapshotSerialized: "",
   lastWebhook: null,
-  dispatcherView: "operations",
+  dispatcherView: window.location.pathname === "/my-mileage" || new URLSearchParams(window.location.search).get("view") === "my-mileage" ? "my-mileage" : "operations",
+  myMileage: null,
+  myMileageTab: "trips",
+  myMileageError: "",
+  operationsPane: "orders",
+  routePreviewOpen: false,
+  routePreviewHidden: false,
   dashboardCustomizing: false,
   dashboardLayout: readDashboardLayout(),
   setupMode: false,
@@ -112,6 +126,7 @@ const state = {
   googleMapsPromise: null,
   googleMapsDrawSeq: 0,
   googleMapsViews: {},
+  mapRequests: {},
   googleRouteCache: new Map(),
   openMapPromise: null,
   openMapViews: {},
@@ -131,13 +146,14 @@ const GOOGLE_ROUTE_CACHE_MS = 30000;
 const OPEN_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 const MAPLIBRE_VERSION = "5.24.0";
 let draggedActiveTrip = null;
+let draggedDraftStop = null;
 let draggedDashboardWidget = null;
 let activeSignatureCanvas = null;
 
 const statusLabels = {
   queued: "Queued",
-  active: "Tracking",
-  completed: "Needs review",
+  active: "In progress",
+  completed: "Completed",
   delivered: "Delivered",
   submitted: "Submitted",
   approved: "Approved",
@@ -172,7 +188,7 @@ const colorChoices = [
   { value: "#dc2626", label: "Red" },
   { value: "#0f766e", label: "Teal" }
 ];
-const DEFAULT_PICKUP_ADDRESS = "1675 Cyrville Rd";
+const DEFAULT_PICKUP_ADDRESS = "";
 
 function companyPickupAddress() {
   return state.snapshot?.company?.pickupAddress || DEFAULT_PICKUP_ADDRESS;
@@ -191,7 +207,7 @@ function parseRoute() {
 }
 
 function dispatcherPath() {
-  return "/operations";
+  return state.dispatcherView === "my-mileage" ? "/?view=my-mileage" : "/operations";
 }
 
 function customerPath(token = "") {
@@ -239,6 +255,7 @@ function api(path, options = {}) {
     if (!response.ok) {
       const message = payload?.error || response.statusText || "Request failed";
       const error = new Error(message);
+      error.status = response.status;
       if (payload && typeof payload === "object" && payload.code) error.code = payload.code;
       throw error;
     }
@@ -254,7 +271,7 @@ function toast(message) {
 }
 
 function hasUnsavedForm() {
-  return Boolean(document.querySelector("form[data-dirty='true'], [data-proof-draft][data-dirty='true']"));
+  return Boolean(document.querySelector("form[data-dirty='true'], [data-proof-draft][data-dirty='true'], .order-editor[data-dirty='true']"));
 }
 
 function markDraftDirty(target) {
@@ -262,11 +279,19 @@ function markDraftDirty(target) {
   if (form) form.dataset.dirty = "true";
   const proofDraft = target?.closest?.("[data-proof-draft]");
   if (proofDraft) proofDraft.dataset.dirty = "true";
+  const orderDraft = target?.closest?.(".order-editor");
+  if (orderDraft) orderDraft.dataset.dirty = "true";
+}
+
+function workspaceInteractionOpen() {
+  const active = document.activeElement;
+  const transientMenus = document.querySelector(".bulk-more[open], .route-more[open], .order-editor[open]")
+    || (!["channels", "accounts", "settings"].includes(state.dispatcherView) && document.querySelector(".nav-more[open]"));
+  return hasUnsavedForm() || Boolean(transientMenus) || Boolean(active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName));
 }
 
 function maybeRender() {
-  const active = document.activeElement;
-  if (hasUnsavedForm() || (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName))) {
+  if (workspaceInteractionOpen()) {
     state.deferRender = true;
     return;
   }
@@ -283,13 +308,19 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("focusout", () => {
   setTimeout(() => {
-    const active = document.activeElement;
-    const stillEditing = hasUnsavedForm() || (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName));
+    const stillEditing = workspaceInteractionOpen();
     if (!state.deferRender || stillEditing) return;
     state.deferRender = false;
     render();
   }, 0);
 });
+
+document.addEventListener("toggle", () => {
+  if (state.deferRender && !workspaceInteractionOpen()) {
+    state.deferRender = false;
+    render();
+  }
+}, true);
 
 function formatMoney(value) {
   const currency = state.snapshot?.company?.currency || state.company?.currency || "USD";
@@ -305,6 +336,7 @@ function formatKm(value) {
 }
 
 function formatRate(value) {
+  if (value === null || value === undefined || value === "") return "Not set";
   return `${formatMoney(value)} / km`;
 }
 
@@ -358,9 +390,11 @@ function getCourierRequests() {
 
 function pruneSelections() {
   const trips = getTrips();
-  const selectableOrders = new Set(trips.filter((trip) => isChannelOrder(trip) && ["queued", "completed"].includes(trip.status) && !trip.courier?.isOpen).map((trip) => trip.id));
-  const selectableActive = new Set(trips.filter((trip) => trip.status === "active").map((trip) => trip.id));
+  const selectableOrders = new Set(trips.filter((trip) => !isNonDeliveryOrder(trip) && isChannelOrder(trip) && trip.status === "queued" && !outsideDailyOrderWindow(trip) && !trip.courier?.isOpen).map((trip) => trip.id));
+  const selectableActive = new Set(trips.filter((trip) => !isNonDeliveryOrder(trip) && trip.status === "active").map((trip) => trip.id));
+  const selectedBefore = state.selectedOrderIds.size;
   state.selectedOrderIds = new Set([...state.selectedOrderIds].filter((id) => selectableOrders.has(id)));
+  if (state.selectedOrderIds.size !== selectedBefore) { state.routeDraftPlan = null; state.routeDraftError = ""; }
   state.selectedActiveTripIds = new Set([...state.selectedActiveTripIds].filter((id) => selectableActive.has(id)));
 }
 
@@ -419,11 +453,11 @@ function tripsForDriver(driverId) {
 }
 
 function activeTrips() {
-  return getTrips().filter((trip) => trip.status === "active");
+  return getTrips().filter((trip) => trip.status === "active" && !isNonDeliveryOrder(trip));
 }
 
 function queuedTrips() {
-  return getTrips().filter((trip) => trip.status === "queued" && !trip.courier?.isOpen);
+  return getTrips().filter((trip) => trip.status === "queued" && !outsideDailyOrderWindow(trip) && !isNonDeliveryOrder(trip) && !trip.courier?.isOpen);
 }
 
 function isWixOrder(trip) {
@@ -443,12 +477,13 @@ function isWixOrderFulfilled(trip) {
 }
 
 function isBusinessTrip(trip) {
-  return (trip.tripType || "business") === "business";
+  return !isNonDeliveryOrder(trip) && (trip.tripType || "business") === "business";
 }
 
 function currentWeekTrips(driverId = "", options = {}) {
   const selectedWeek = state.snapshot?.weekKey || weekKeyOf();
   return getTrips().filter((trip) => {
+    if (isNonDeliveryOrder(trip)) return false;
     if (trip.status === "queued") return false;
     if (options.businessOnly && !isBusinessTrip(trip)) return false;
     const date = trip.endedAt || trip.startedAt;
@@ -494,13 +529,13 @@ function proofRecordHtml(trip, options = {}) {
   return `
     <div class="proof-record${override ? " is-override" : ""}${trip.status === "exception" ? " is-exception" : ""}">
       <div class="proof-record-head">
-        <strong>${h(proof.exceptionReason || proof.method || "Completion record")}</strong>
-        <span class="status ${override ? "queued" : trip.status === "exception" ? "exception" : "available"}">${override ? "Dispatcher override" : trip.status === "exception" ? "Issue recorded" : "Proof saved"}</span>
+        <strong>${h(override ? "Completed by dispatch" : proof.exceptionReason || proof.method || "Completion record")}</strong>
+        ${override ? "" : `<span class="status ${trip.status === "exception" ? "exception" : "available"}">${trip.status === "exception" ? "Issue recorded" : "Proof saved"}</span>`}
       </div>
       <p>${proof.recipient ? `Received by ${h(proof.recipient)} · ` : ""}${proof.recordedAt ? h(formatDate(proof.recordedAt)) : ""}${proof.recordedBy ? ` · ${h(proof.recordedBy)}` : ""}</p>
       ${proof.exceptionNote ? `<p>${h(proof.exceptionNote)}</p>` : ""}
       ${proof.nextAction ? `<p>Next action: ${h(proof.nextAction === "retry" ? "Retry later" : proof.nextAction === "return" ? "Return to depot" : "Needs dispatcher")}</p>` : ""}
-      ${override && proof.overrideReason ? `<p>${h(proof.overrideReason)}</p>` : ""}
+      ${override ? `<details><summary>Completion details</summary><p>Recorded by dispatch, not submitted as driver proof.${proof.overrideReason ? ` ${h(proof.overrideReason)}` : ""}</p></details>` : ""}
       ${trip.dispatcherConfirmation ? `<p><strong>Dispatch confirmed:</strong> ${h(trip.dispatcherConfirmation.reason || "Confirmed delivered")}${trip.dispatcherConfirmation.recordedAt ? ` · ${h(formatDate(trip.dispatcherConfirmation.recordedAt))}` : ""}</p>` : ""}
       ${mediaHtml ? `<div class="proof-media-grid">${mediaHtml}</div>` : options.compact ? "" : `<p class="proof-empty">No photo or signature attached.</p>`}
       ${historyHtml}
@@ -512,7 +547,9 @@ function wixFulfillmentPill(trip) {
   if (!status) return "";
   const label = status.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   const className = status === "FULFILLED" ? "wix-fulfilled" : "wix-pending";
-  return `<span class="status ${className}">${h(label)}</span>`;
+  const payment=String(trip.source?.paymentStatus || "").toUpperCase();
+  const paymentLabel=({NOT_PAID:"Not paid",PARTIALLY_PAID:"Partially paid",PENDING:"Pending",PENDING_MERCHANT:"Awaiting provider",PARTIALLY_REFUNDED:"Partially refunded"})[payment];
+  return `<span class="status ${className}">${h(label)}</span>${paymentLabel ? `<span class="status wix-pending">Payment: ${h(paymentLabel)}</span>` : ""}`;
 }
 
 function shareUrl(tokenOrTrip) {
@@ -628,6 +665,8 @@ function liveDriverStop(trip) {
   if (!trip?.location || !Number.isFinite(Number(trip.location.lat)) || !Number.isFinite(Number(trip.location.lng))) {
     return null;
   }
+  const receivedAt = Date.parse(trip.location.timestamp || "");
+  if (!Number.isFinite(receivedAt) || Date.now() - receivedAt > 90000 || receivedAt > Date.now() + 60000) return null;
   return {
     label: "Driver",
     address: {
@@ -640,6 +679,7 @@ function liveDriverStop(trip) {
 
 function googleRouteStops(trip, options = {}) {
   const stops = routeStops(trip, options);
+  if (options.planned) return stops;
   const liveStop = trip?.status === "active" ? liveDriverStop(trip) : null;
   if (!liveStop) return stops;
   if (options.customer) return [liveStop, stops.at(-1)].filter(Boolean);
@@ -660,7 +700,7 @@ function googleStopKey(stop) {
 
 function googleRouteCacheKey(trip, options = {}) {
   const plannedStops = routeStops(trip, options).map(googleStopKey).join("|");
-  const routeOrigin = liveDriverStop(trip) ? "live" : "planned";
+  const routeOrigin = !options.planned && trip.status === "active" && liveDriverStop(trip) ? "live" : "planned";
   return `${options.customer ? "customer" : "fleet"}:${trip.preserveStopOrder ? "fixed" : "optimize"}:${trip.id}:${trip.status}:${routeOrigin}:${plannedStops}`;
 }
 
@@ -673,7 +713,8 @@ function formatEtaTime(durationMillis) {
 }
 
 function formatDurationFromMillis(durationMillis) {
-  const minutes = Math.max(1, Math.round(Number(durationMillis || 0) / 60000));
+  if (!Number.isFinite(Number(durationMillis)) || Number(durationMillis) <= 0) return "";
+  const minutes = Math.max(1, Math.round(Number(durationMillis) / 60000));
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
@@ -689,6 +730,24 @@ function routeSummaryFromGoogle(route) {
     distance,
     eta
   };
+}
+
+function plannedGoogleEstimateLines(route, stops) {
+  const returns = stops.length > 2 && (/^return\b/i.test(stops.at(-1)?.label || "") || googleStopLocation(stops[0]) === googleStopLocation(stops.at(-1)));
+  const legs = route.legs || [];
+  const completeMetrics = legs.length === stops.length - 1 && legs.every(leg => Number.isFinite(leg.durationMillis) && leg.durationMillis > 0 && Number.isFinite(leg.distanceMeters) && leg.distanceMeters >= 0);
+  const total = routeSummaryFromGoogle(route);
+  const formatLegs = items => {
+    const duration = formatDurationFromMillis(items.reduce((sum,leg) => sum + leg.durationMillis,0));
+    const distance = `${(items.reduce((sum,leg) => sum + leg.distanceMeters,0) / 1000).toFixed(1)} km`;
+    return [duration,distance].filter(Boolean).join(" · ");
+  };
+  const deliveries = Math.max(0,stops.length - 1 - Number(returns));
+  if (returns && completeMetrics) return [
+    `${deliveries} deliver${deliveries === 1 ? "y" : "ies"} · Driving estimate from pickup: ${formatLegs(legs.slice(0,-1))}`,
+    `Return to depot estimate: ${formatLegs(legs.slice(-1))}`
+  ];
+  return [`${deliveries} deliver${deliveries === 1 ? "y" : "ies"} · ${returns ? "Full route estimate (includes return to depot)" : "Driving estimate from pickup"}: ${[total.duration,total.distance].filter(Boolean).join(" · ") || "unavailable"}`];
 }
 
 function isStandalone() {
@@ -760,10 +819,11 @@ function sectionNavLinks(items, options = {}) {
   const compact = Boolean(options.compact);
   const linkClass = compact ? "mobile-tab" : "nav-link";
   const markerClass = compact ? "mobile-tab-mark" : "nav-dot";
+  const icons = {today:'<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h7a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8"/>',trips:'<path d="M4 5h16M4 12h16M4 19h10"/>',report:'<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h5"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>'};
   return items
     .map((item) => `
       <a class="${linkClass}" data-section-link="${h(item.id)}" href="#${h(item.id)}">
-        <span class="${markerClass}"></span><span>${h(item.label)}</span>
+        ${compact && icons[item.id] ? `<svg class="mobile-nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[item.id]}</svg>` : `<span class="${markerClass}" aria-hidden="true"></span>`}<span>${h(item.label)}</span>
       </a>
     `)
     .join("");
@@ -776,6 +836,7 @@ function dispatcherViewLinks(options = {}) {
   const markerClass = compact ? "mobile-tab-mark" : "nav-dot";
   const items = advanced
     ? [
+        { id: "analytics", label: "Analytics" },
         { id: "channels", label: "Connections" },
         { id: "accounts", label: "Accounts" },
         { id: "settings", label: "Settings" }
@@ -783,7 +844,7 @@ function dispatcherViewLinks(options = {}) {
     : [
         { id: "operations", label: "Today" },
         { id: "drivers", label: "Team" },
-        { id: "analytics", label: "Analytics" },
+        { id: "my-mileage", label: "My Mileage" },
         { id: "reports", label: "Reports" }
       ];
   return items.map((item) => `
@@ -806,6 +867,7 @@ function workspaceToolsNav() {
     <nav class="workspace-switcher" aria-label="Workspace tools">
       <span>Workspace tools</span>
       ${[
+        { id: "analytics", label: "Analytics" },
         { id: "channels", label: "Connections" },
         { id: "accounts", label: "Accounts" },
         { id: "settings", label: "Settings" }
@@ -815,18 +877,27 @@ function workspaceToolsNav() {
     </nav>`;
 }
 
-function syncSectionNavigation() {
+function syncSectionNavigation(event) {
   const links = Array.from(document.querySelectorAll("[data-section-link]"));
   if (!links.length) return;
   const requested = window.location.hash.replace(/^#/, "");
   const activeId = links.some((link) => link.dataset.sectionLink === requested)
     ? requested
-    : links[0].dataset.sectionLink;
+    : state.auth?.role === "driver" ? (state.driverMapTrips?.length ? "today" : "trips") : links[0].dataset.sectionLink;
   for (const link of links) {
     const isActive = link.dataset.sectionLink === activeId;
     link.classList.toggle("active", isActive);
     if (isActive) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
+  }
+  if (state.auth?.role === "driver") {
+    for (const section of document.querySelectorAll(".driver-section")) section.hidden = section.id !== activeId;
+    document.querySelector(".app-shell")?.setAttribute("data-driver-view", activeId);
+    if (event?.type === "hashchange") window.scrollTo({ top: 0, behavior: "instant" });
+    if (activeId === "today") {
+      const mapTrips = state.driverMapTrips || [];
+      requestAnimationFrame(() => drawMap("driver-map", mapTrips));
+    }
   }
 }
 
@@ -835,13 +906,13 @@ function navHtml() {
     return `
       <nav class="nav" aria-label="Driver">
         ${sectionNavLinks([
-          { id: "today", label: "Today" },
+          { id: "today", label: "Route" },
           { id: "trips", label: "Trips" },
           { id: "report", label: "Report" },
-          { id: "profile", label: "Profile" }
+          { id: "profile", label: "Settings" }
         ])}
-        <button class="nav-action" data-action="logout" type="button"><span class="nav-dot"></span><span>Log Out</span></button>
-        ${isStandalone() ? "" : `<button class="nav-action" data-action="install-app" type="button"><span class="nav-dot"></span><span>Install App</span></button>`}
+        <button class="nav-action" data-rivo-appearance type="button">Display theme</button><button class="nav-action" data-action="logout" type="button"><span class="nav-dot"></span><span>Log Out</span></button>
+        ${isStandalone() ? "" : `<button class="nav-action" data-action="install-app" type="button"><span class="nav-dot"></span><span>Add web shortcut</span></button>`}
       </nav>
     `;
   }
@@ -852,6 +923,7 @@ function navHtml() {
         <summary><span class="nav-dot"></span><span>More</span></summary>
         <div class="nav-more-links">${dispatcherViewLinks({ advanced: true })}</div>
       </details>
+      <button class="nav-action" data-rivo-appearance type="button">Display theme</button>
       <button class="nav-action" data-action="logout" type="button"><span class="nav-dot"></span><span>Log Out</span></button>
       ${isStandalone() ? "" : `<button class="nav-action" data-action="install-app" type="button"><span class="nav-dot"></span><span>Install App</span></button>`}
     </nav>
@@ -863,10 +935,10 @@ function mobileTabsHtml() {
     return `
       <nav class="mobile-tabs" aria-label="Driver mobile">
         ${sectionNavLinks([
-          { id: "today", label: "Today" },
+          { id: "today", label: "Route" },
           { id: "trips", label: "Trips" },
           { id: "report", label: "Report" },
-          { id: "profile", label: "Profile" }
+          { id: "profile", label: "Settings" }
         ], { compact: true })}
       </nav>
     `;
@@ -885,10 +957,11 @@ function shellHtml(content) {
   const brandSubtitle = companyName.toLowerCase() === "rova" ? workspaceLabel : `${companyName} · ${workspaceLabel}`;
   return `
     ${mobileTabsHtml()}
-    <div class="app-shell">
+    <a class="workspace-skip" href="#workspace-main">Skip to workspace</a>
+    <div class="app-shell${state.auth?.role === "driver" ? " mileage-workspace" : ""}">
       <aside class="sidebar">
         <div class="brand">
-          <div class="rova-symbol brand-mark" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></div>
+          <div class="rova-symbol brand-mark" aria-hidden="true"><img src="/assets/rivo-pinwheel.svg?v=103" alt=""></div>
           <div class="brand-text">
             <div class="brand-name">Rivo</div>
             <div class="brand-subtitle">${h(brandSubtitle)}</div>
@@ -896,10 +969,10 @@ function shellHtml(content) {
         </div>
         ${navHtml()}
         <div class="sidebar-footer">
-          ${state.auth?.role === "driver" ? "Your assigned routes, delivery updates, and paid mileage stay together here." : "Today's deliveries, your drivers, and the work that needs attention."}
+          ${state.auth?.role === "driver" ? "Your trips stay private. Share only the business mileage you submit." : "Today's deliveries, your drivers, and the work that needs attention."}
         </div>
       </aside>
-      <main class="main">
+      <main class="main" id="workspace-main" tabindex="-1">
         ${content}
       </main>
     </div>
@@ -939,16 +1012,23 @@ function defaultDriverRate() {
 }
 
 function renderMapBlock(id, trips, options = {}) {
-  const legendTrips = trips.filter((trip) => trip.driver);
+  const legendTrips = [...new Map(trips.filter(trip => trip.driver).map(trip => [trip.driver.id || trip.driver.name, trip])).values()];
   const small = options.small ? " small" : "";
   const label = options.label || "Live map";
   return `
-    <div class="map-wrap${small}">
-      <div class="map-badge" data-map-badge-for="${h(id)}">${h(label)}</div>
-      <div class="google-map" id="${h(id)}-google"></div>
-      <canvas class="map-canvas" id="${h(id)}"></canvas>
-      <div class="map-eta" id="${h(id)}-eta" hidden></div>
-      <div class="map-legend">
+    <div class="route-map" data-route-map="${h(id)}">
+      <div class="route-map-toolbar">
+        <span class="map-badge" data-map-badge-for="${h(id)}">${h(label)}</span>
+        <div class="route-map-actions"><button class="map-control" data-action="fit-route-map" data-map-id="${h(id)}" type="button">Fit route</button><button class="map-control" data-action="expand-route-map" data-map-id="${h(id)}" aria-expanded="false" type="button">Expand</button></div>
+      </div>
+      <div class="map-wrap${small}" aria-label="${h(label)}">
+        <div class="google-map" id="${h(id)}-google"></div>
+        <canvas class="map-canvas" id="${h(id)}" aria-hidden="true"></canvas>
+      </div>
+      <div class="route-map-footer">
+      <div class="map-eta" id="${h(id)}-eta" role="status" hidden></div>
+      <div class="map-legend" aria-label="Route drivers">
+        ${trips.length && !options.customer ? '<span class="legend-item"><span class="route-depot-key">D</span>Pickup / depot</span>' : ""}
         ${
           legendTrips.length
             ? legendTrips
@@ -959,11 +1039,19 @@ function renderMapBlock(id, trips, options = {}) {
                   </span>
                 `)
                 .join("")
-            : `<span class="legend-item">Waiting for first location</span>`
+            : `<span class="legend-item">${trips.length ? "Planned stops" : "Select orders to preview a route"}</span>`
         }
+      </div>
       </div>
     </div>
   `;
+}
+
+function trackingStatus(trip) {
+  const timestamp = Date.parse(trip?.location?.timestamp || "");
+  if (!Number.isFinite(timestamp)) return "No GPS received — driver must start location sharing";
+  const age = Math.max(0, Date.now() - timestamp);
+  return age <= 90000 ? "GPS live" : `GPS stale — last received ${relativeTime(trip.location.timestamp)}`;
 }
 
 function activeTripItem(trip) {
@@ -1013,7 +1101,8 @@ function activeTripItem(trip) {
         </div>
       </div>
       <div class="item-detail">
-        ${formatKm(trip.distanceKm)} logged at ${formatRate(trip.kmRate)}. Last update ${relativeTime(trip.location?.timestamp || trip.startedAt)}.
+        ${formatKm(trip.distanceKm)} logged at ${formatRate(trip.kmRate)}. <strong>${h(trackingStatus(trip))}</strong>.
+        ${trip.startedAt ? `<br><span class="item-detail">Started ${h(formatDate(trip.startedAt))} · Still marked in progress</span>` : ""}
       </div>
       <details class="active-trip-details">
         <summary>Route details & customer links</summary>
@@ -1080,9 +1169,12 @@ function activeRouteGroups(trips) {
 function activeRoutePreviewTrips(trips) {
   return activeRouteGroups(trips).map((group) => {
     const first = group[0];
+    const latest = group.filter((trip) => trip.location?.timestamp).sort((a, b) => Date.parse(b.location.timestamp) - Date.parse(a.location.timestamp))[0];
     const origin = first.routeOrigin || first.pickup || companyPickupAddress();
     return {
       ...first,
+      location: latest?.location || first.location,
+      path: latest?.path || first.path,
       preserveStopOrder: true,
       customerName: `${first.driver?.name || "Driver"} route`,
       stops: [
@@ -1095,23 +1187,94 @@ function activeRoutePreviewTrips(trips) {
 }
 
 function selectedOrderPreviewTrips() {
-  const selected = getTrips().filter((trip) => state.selectedOrderIds.has(trip.id));
+  const selected = selectedRouteOrders();
   if (!selected.length) return [];
   const first = selected[0];
-  const origin = companyPickupAddress();
-  const selectedDriverId = document.getElementById("bulk-order-driver")?.value || first.driverId || "";
+  const origin = companyPickupAddress() || first.pickup;
+  const selectedDriverId = state.bulkDriverId || getDrivers()[0]?.id || first.driverId || "";
   const driver = getDriver(selectedDriverId) || first.driver;
+  const existing = activeTrips().filter(trip => trip.driverId === selectedDriverId).sort((a,b) => Number(a.routeSequence || 0)-Number(b.routeSequence || 0));
+  const start = existing.at(-1)?.destination || origin;
   return [{
     ...first,
     driver,
+    status: "queued",
+    location: null,
+    path: [],
+    preserveStopOrder: true,
     customerName: `${selected.length} selected order${selected.length === 1 ? "" : "s"}`,
     pickup: origin,
     stops: [
-      { label: "Start", address: origin },
+      { label: "Start", address: start },
       ...selected.map((trip, index) => ({ label: `Stop ${index + 1}: ${trip.customerName}`, address: trip.destination })),
       { label: "Return", address: origin }
     ]
   }];
+}
+
+function selectedRouteOrders() {
+  const selected = getTrips().filter((trip) => state.selectedOrderIds.has(trip.id));
+  const byId = new Map(selected.map(trip => [trip.id, trip]));
+  const order = [...new Set([...state.routeDraftIds, ...selected.map(trip => trip.id)])].filter(id => byId.has(id));
+  state.routeDraftIds = order;
+  return order.map(id => byId.get(id));
+}
+
+function routePlanPanelHtml() {
+  const selected = selectedRouteOrders();
+  const driver = getDriver(state.bulkDriverId) || getDrivers()[0];
+  const origin = companyPickupAddress() || selected[0]?.pickup || "Set a pickup address";
+  return `<section class="panel route-plan-panel" aria-label="Route plan">
+    <div class="panel-header"><div><h2 class="panel-title">${selected.length ? "Route plan" : "Build a route"}</h2><p class="panel-subtitle">${selected.length ? `${selected.length} stops selected` : "Select orders from the list to begin."}</p></div>${selected.length ? '<button class="button ghost" data-action="clear-order-selection" type="button">Clear</button>' : ""}</div>
+    <div class="panel-body">
+    ${selected.length ? `<div class="route-origin"><span>Pickup / return</span><strong>${h(origin)}</strong></div>
+      <div class="route-plan-tools"><button class="button secondary" data-action="optimize-route-draft" type="button" ${state.routeDraftLoading || selected.length < 2 || selected.length > 25 ? "disabled" : ""}>${state.routeDraftLoading ? "Optimizing…" : "Optimize stops"}</button><span>${state.routeDraftPlan?.optimized ? "Google-optimized order" : "Your stop order"}</span></div>
+      ${selected.length > 25 ? '<p class="route-plan-error" role="alert">Select up to 25 stops per route so every stop can be previewed.</p>' : ""}
+      ${state.routeDraftError ? `<p class="route-plan-error" role="alert">${h(state.routeDraftError)}</p>` : ""}
+      ${state.routeDraftPlan?.optimized && state.routeDraftPlan?.durationMinutes != null ? `<p class="route-plan-summary">Full route estimate: ${state.routeDraftPlan.distanceKm != null ? `${formatKm(state.routeDraftPlan.distanceKm)} / ` : ""}${state.routeDraftPlan.durationMinutes} min · includes return to depot</p>` : ""}
+      ${activeTrips().some(trip => trip.driverId === driver?.id) ? '<p class="route-plan-summary">These stops will be appended to this driver’s active route.</p>' : ""}
+      <ol class="route-draft-stops">${selected.map((trip,index) => `<li draggable="true" data-draft-stop="${h(trip.id)}"><span class="stop-number">${index+1}</span><div><strong>${h(trip.customerName)}</strong><span>${h(trip.destination)}</span></div><div class="stop-reorder"><button type="button" data-action="move-draft-stop" data-trip-id="${h(trip.id)}" data-direction="up" aria-label="Move ${h(trip.customerName)} up" ${index === 0 ? "disabled" : ""}>↑</button><button type="button" data-action="move-draft-stop" data-trip-id="${h(trip.id)}" data-direction="down" aria-label="Move ${h(trip.customerName)} down" ${index === selected.length-1 ? "disabled" : ""}>↓</button></div></li>`).join("")}</ol>
+      <div class="route-send"><label for="bulk-order-driver">Assign driver</label><select class="select" id="bulk-order-driver" data-rate-source="bulk-order-rate" ${driver ? "" : "disabled"}>${driver ? driverOptions(driver.id) : '<option value="">Add a driver first</option>'}</select><button class="button" data-action="dispatch-selected-route" type="button" ${driver && !state.routeDraftLoading && selected.length <= 25 ? "" : "disabled"}>Send route</button></div>
+      <details class="route-more"><summary>Rate & other actions</summary><div class="bulk-more-menu"><label for="bulk-order-rate">Driver rate (CAD/km)</label><input class="input" id="bulk-order-rate" type="number" min="0" step="0.01" value="${h(state.bulkRate ?? driver?.defaultRate ?? defaultDriverRate())}"><button class="button secondary" data-action="assign-selected-orders" type="button" ${driver ? "" : "disabled"}>Assign without starting</button><button class="button secondary" data-action="request-selected-courier" type="button">Request courier</button><button class="button secondary" data-action="mark-selected-delivered" type="button">Mark delivered</button></div></details>
+    ` : '<div class="route-plan-empty"><strong>Orders → route → driver</strong><p>Select one or more orders. Preview and arrange stops here before sending.</p></div>'}
+    </div></section>`;
+}
+
+function refreshRouteDraft(invalidate = true) {
+  if (invalidate) { state.routeDraftPlan = null; state.routeDraftError = ""; }
+  const panel = document.querySelector(".route-plan-panel");
+  if (panel) panel.outerHTML = routePlanPanelHtml();
+  const subtitle = document.querySelector("#route-preview .panel-subtitle");
+  if (subtitle) subtitle.textContent = state.selectedOrderIds.size ? `${state.selectedOrderIds.size} selected orders` : "Active routes and driver locations";
+  drawMap("dispatcher-map", dispatcherMapTrips());
+}
+
+async function optimizeRouteDraft() {
+  const ids = selectedRouteOrders().map(trip => trip.id);
+  if (ids.length < 2) return;
+  const driverId = state.bulkDriverId || getDrivers()[0]?.id || "";
+  state.routeDraftLoading = true;
+  state.routeDraftError = "";
+  refreshRouteDraft(false);
+  try {
+    const plan = await api("/api/routes/preview", { method:"POST", body:{tripIds:ids, driverId, origin:companyPickupAddress()} });
+    if (JSON.stringify(ids) !== JSON.stringify(selectedRouteOrders().map(trip => trip.id)) || driverId !== (state.bulkDriverId || getDrivers()[0]?.id || "")) return;
+    if (plan.tripIds.length !== ids.length || new Set(plan.tripIds).size !== ids.length || plan.tripIds.some(id => !ids.includes(id))) throw new Error("The route plan changed. Please try again.");
+    state.routeDraftIds = plan.tripIds;
+    state.routeDraftPlan = plan;
+    if (!plan.optimized) state.routeDraftError = "Google optimization is unavailable. Your stop order is unchanged; you can arrange it manually.";
+  } catch (error) { state.routeDraftError = error.message; }
+  finally { state.routeDraftLoading = false; refreshRouteDraft(false); }
+}
+
+function fleetVisibilityHtml() {
+  const drivers = getDrivers();
+  return `<section class="panel fleet-visibility" aria-label="Driver visibility"><div class="panel-header"><h2 class="panel-title">Drivers on the road</h2><button class="button ghost" data-action="dispatcher-view" data-view="drivers" type="button">Team</button></div><div class="panel-body">${drivers.length ? drivers.map(driver => {
+    const assigned = activeTrips().filter(trip => trip.driverId === driver.id);
+    const latest = assigned.filter(trip => trip.location?.timestamp).sort((a,b) => Date.parse(b.location.timestamp)-Date.parse(a.location.timestamp))[0];
+    const live = latest && Date.now()-Date.parse(latest.location.timestamp) < 90000;
+    return `<div class="fleet-driver"><span class="driver-initials">${h(initials(driver.name))}</span><div><strong>${h(driver.name)}</strong><span>${assigned.length ? `${assigned.length} active stops` : "No active deliveries"}</span></div><span class="fleet-gps ${live ? "live" : ""}">${assigned.length ? live ? "GPS live" : latest ? `Last seen ${relativeTime(latest.location.timestamp)}` : "No GPS yet" : h(statusLabels[driver.status] || driver.status || "Offline")}</span></div>`;
+  }).join("") : '<p class="empty">Add your first driver in Team.</p>'}</div></section>`;
 }
 
 function dispatcherMapTrips() {
@@ -1119,7 +1282,14 @@ function dispatcherMapTrips() {
   if (selectedPreview.length) return selectedPreview;
   const active = activeTrips();
   if (active.length) return activeRoutePreviewTrips(active);
-  return getTrips().filter((trip) => trip.status !== "queued").slice(0, 4);
+  const queued = queuedTrips().slice(0, 25);
+  if (queued.length) {
+    const origin = companyPickupAddress() || queued[0].pickup;
+    return [{ ...queued[0], id: `queued:${queued.map(trip => trip.id).join(",")}`, driver: null, location: null, path: [], preserveStopOrder: true,
+      customerName: `${queued.length} waiting order${queued.length === 1 ? "" : "s"}`,
+      stops: [{label:"Pickup",address:origin}, ...queued.map((trip,index) => ({label:`Stop ${index+1}: ${trip.customerName}`,address:trip.destination})), {label:"Return",address:origin}] }];
+  }
+  return [];
 }
 
 function activeRouteGroupsHtml(trips) {
@@ -1147,9 +1317,9 @@ function activeBulkToolbarHtml(trips) {
 }
 
 function queuedOrderItem(trip) {
-  const sourceLabel = `${channelLabel(trip.source?.system)} order #${trip.source?.orderNumber || trip.source?.orderId || ""}`;
+  const sourceLabel = isChannelOrder(trip) && trip.source?.system !== "manual" ? `${channelLabel(trip.source?.system)} order #${trip.source?.orderNumber || trip.source?.orderId || ""}` : "Manual delivery";
   const hasOpenCourierRequest = Boolean(trip.courier?.isOpen);
-  const canManage = ["queued", "completed", "exception"].includes(trip.status) && !hasOpenCourierRequest;
+  const canManage = !isNonDeliveryOrder(trip) && ["queued", "completed", "exception"].includes(trip.status) && !hasOpenCourierRequest;
   const mapsUrl = googleMapsDirectionsUrl(trip);
   const selectedClass = state.selectedOrderIds.has(trip.id) ? " is-selected" : "";
   const proofLocked = Boolean(trip.proof);
@@ -1160,21 +1330,23 @@ function queuedOrderItem(trip) {
     <article class="item order-card${selectedClass}" data-order-card data-order-status="${h(trip.status)}" data-order-search="${h(searchText)}">
       <div class="order-card-head">
         <div class="order-select-wrap">
-          ${canManage ? selectionCheckboxHtml("order", trip, trip.customerName) : ""}
+          ${canManage && state.operationsPane !== "history" ? selectionCheckboxHtml("order", trip, trip.customerName) : ""}
           <div>
             <p class="item-title">${h(trip.customerName)}</p>
             <p class="item-detail">${h(sourceLabel)} · ${relativeTime(trip.source?.createdDate || trip.importedAt)}</p>
           </div>
         </div>
-        <div class="item-actions">${trip.driver?.name ? `<span class="status assigned">${h(trip.driver.name)}</span>` : ""}${courierPill(trip.courier)}${statusPill(trip.status)}${wixFulfillmentPill(trip)}</div>
+        <div class="item-actions">${trip.driver?.name ? `<span class="status assigned">${h(trip.driver.name)}</span>` : ""}${courierPill(trip.courier)}${statusPill(trip.status)}${outsideDailyOrderWindow(trip) ? '<span class="status">Past 24-hour window</span>' : ""}${wixFulfillmentPill(trip)}</div>
       </div>
-      <div class="order-route-summary">
+      <div class="order-route-summary${trip.pickup === companyPickupAddress() ? " common-pickup" : ""}">
         <span><small>Pickup</small>${h(trip.pickup)}</span>
         <span class="order-route-arrow" aria-hidden="true">→</span>
         <span><small>Deliver</small>${h(trip.destination)}</span>
       </div>
       ${hasOpenCourierRequest ? `<div class="courier-order-note"><strong>Courier handoff in progress</strong><span>Manage status, provider reference, fee, and tracking in Open courier requests.</span></div>` : ""}
-      ${trip.proof ? proofRecordHtml(trip, { compact: true }) : ""}
+      ${trip.completionTimeUnknown ? `<p class="item-detail">Completed earlier · exact delivery time was not recorded. Correction saved ${h(formatDate(trip.completionRecordedAt))}.</p>` : trip.completionSource === "gps-detected" ? `<p class="item-detail">Auto-completed from a GPS stop and departure · handoff not verified.</p>` : ""}
+      ${trip.status === "completed" && trip.completionSource === "gps-detected" ? `<button class="button ghost compact-action" data-action="undo-auto-completion" data-trip-id="${h(trip.id)}" type="button">Undo auto-completion</button>` : ""}
+      ${trip.proof ? `<details class="order-proof"><summary>View delivery record</summary>${proofRecordHtml(trip, { compact: true })}</details>` : ""}
       <details class="order-editor">
         <summary>Edit order details</summary>
         <div class="form-grid compact order-editor-grid">
@@ -1211,9 +1383,10 @@ function queuedOrderItem(trip) {
 }
 
 function bulkOrderToolbarHtml(orders) {
-  if (!orders.length) return "";
+  if (!orders.length || state.operationsPane === "history") return "";
   const selectedCount = orders.filter((trip) => state.selectedOrderIds.has(trip.id)).length;
   const allSelected = selectedCount === orders.length;
+  if (state.operationsPane === "orders" && !state.dashboardCustomizing) return `<div class="order-selection-line" data-order-bulk-toolbar><label class="bulk-select-all"><input type="checkbox" data-select-all-orders ${allSelected ? "checked" : ""}><span data-order-select-all-label>Select all shown</span></label><span><strong data-order-selection-count>${selectedCount}</strong> selected</span></div>`;
   const hasDrivers = getDrivers().length > 0;
   const selectedDriver = getDriver(state.bulkDriverId) || getDrivers()[0];
   const selectedRate = state.bulkRate === null ? Number(selectedDriver?.defaultRate || defaultDriverRate()) : state.bulkRate;
@@ -1227,18 +1400,15 @@ function bulkOrderToolbarHtml(orders) {
           ${hasDrivers ? driverOptions(selectedDriver?.id || "") : `<option value="">Add a driver first</option>`}
         </select>
       </div>
-      <div class="bulk-rate-control">
-        <label for="bulk-order-rate">$/km</label>
-        <input class="input" id="bulk-order-rate" type="number" min="0" step="0.01" value="${h(selectedRate)}" ${hasDrivers ? "" : "disabled"}>
-      </div>
       <div class="bulk-actions">
-        <button class="button secondary" data-action="assign-selected-orders" data-requires-order-selection data-requires-driver type="button" ${selectedCount && hasDrivers ? "" : "disabled"}>Assign</button>
-        <button class="button" data-action="dispatch-selected-route" data-requires-order-selection data-requires-driver type="button" ${selectedCount && hasDrivers ? "" : "disabled"}>Dispatch driver</button>
-        <button class="button courier-action" data-action="request-selected-courier" data-requires-order-selection type="button" ${selectedCount ? "" : "disabled"}>Request courier</button>
+        <button class="button secondary" data-action="show-route-preview" data-requires-order-selection type="button" ${selectedCount ? "" : "disabled"}>Preview route</button>
+        <button class="button" data-action="dispatch-selected-route" data-requires-order-selection data-requires-driver type="button" ${selectedCount && hasDrivers ? "" : "disabled"}>Send to driver</button>
         <details class="bulk-more">
           <summary class="button ghost">More</summary>
           <div class="bulk-more-menu">
-            <button class="button secondary" data-action="show-route-preview" data-requires-order-selection type="button" ${selectedCount ? "" : "disabled"}>Preview map</button>
+            <div class="bulk-rate-control"><label for="bulk-order-rate">Driver rate ($/km)</label><input class="input" id="bulk-order-rate" type="number" min="0" step="0.01" value="${h(selectedRate)}" ${hasDrivers ? "" : "disabled"}></div>
+            <button class="button secondary" data-action="assign-selected-orders" data-requires-order-selection data-requires-driver type="button" ${selectedCount && hasDrivers ? "" : "disabled"}>Assign without starting</button>
+            <button class="button secondary" data-action="request-selected-courier" data-requires-order-selection type="button" ${selectedCount ? "" : "disabled"}>Request courier</button>
             <button class="button success" data-action="mark-selected-delivered" data-requires-order-selection type="button" ${selectedCount ? "" : "disabled"}>Mark delivered</button>
             <button class="button ghost" data-action="clear-order-selection" data-requires-order-selection type="button" ${selectedCount ? "" : "disabled"}>Clear selection</button>
           </div>
@@ -1253,14 +1423,6 @@ function orderFilterToolbarHtml(total) {
       <label class="order-search-field">
         <span class="sr-only">Search orders</span>
         <input class="input" type="search" data-order-search-input value="${h(state.orderQuery)}" placeholder="Search customer, order, address, or driver" autocomplete="off">
-      </label>
-      <label class="order-filter-field">
-        <span class="sr-only">Filter orders</span>
-        <select class="select" data-order-filter>
-          <option value="all"${state.orderFilter === "all" ? " selected" : ""}>All work</option>
-          <option value="ready"${state.orderFilter === "ready" ? " selected" : ""}>Ready</option>
-          <option value="review"${state.orderFilter === "review" ? " selected" : ""}>Needs review</option>
-        </select>
       </label>
       <span class="count-chip"><span data-order-visible-count>${total}</span> shown</span>
     </div>
@@ -1290,22 +1452,24 @@ function channelOrdersPanel(trips) {
   const lastSyncedConnection = connections.filter((item) => item.lastSyncAt).sort((a, b) => new Date(b.lastSyncAt) - new Date(a.lastSyncAt))[0];
   const connectedText = connections.length ? `${connections.length} channel${connections.length === 1 ? "" : "s"} connected` : "No sales channel connected";
   const lastSync = lastSyncedConnection ? `Last sync ${relativeTime(lastSyncedConnection.lastSyncAt)}` : "Not synced yet";
+  const history = state.operationsPane === "history";
   const channelOrders = trips
-    .filter((trip) => isChannelOrder(trip) && ["queued", "completed"].includes(trip.status))
+    .filter((trip) => (history || !isNonDeliveryOrder(trip)) && (history ? (["completed", "delivered", "submitted", "approved", "rejected", "failed"].includes(trip.status) || ((trip.status === "queued" || isNonDeliveryOrder(trip)) && outsideDailyOrderWindow(trip))) : trip.status === "queued" && !outsideDailyOrderWindow(trip) && !trip.courier?.isOpen))
     .sort((left, right) => new Date(right.source?.createdDate || right.importedAt || 0) - new Date(left.source?.createdDate || left.importedAt || 0));
-  const dispatchQueue = channelOrders.filter((trip) => trip.status === "queued" && !trip.courier?.isOpen);
-  const needsReview = channelOrders.filter((trip) => trip.status === "completed");
+  const dispatchQueue = channelOrders;
   return `
     <div class="panel orders-panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Online orders</h2>
-          <p class="panel-subtitle">${h(connectedText)} · ${h(lastSync)}</p>
+          <h2 class="panel-title">${history ? "Delivery history" : "Orders to dispatch"}</h2>
+          <p class="panel-subtitle">${history ? "Past orders and completed deliveries. Original statuses and proof are preserved." : `${channelOrders.length} waiting for a route · Wix orders from the past 24 hours`}</p>
         </div>
         <div class="item-actions">
-          ${dispatchQueue.length && getDrivers().some((driver) => driver.status !== "offline") ? `<button class="button" data-action="auto-assign-orders" type="button">Balance orders ${dispatchQueue.length}</button>` : ""}
-          <button class="button secondary" data-action="sync-channels">Sync all</button>
-          <button class="button ghost" data-action="dispatcher-view" data-view="channels">Connect a site</button>
+          ${history ? "" : `<details class="bulk-more"><summary class="button ghost">Import & tools</summary><div class="bulk-more-menu">
+          <span class="item-detail">${h(connectedText)} · ${h(lastSync)}</span>
+          ${dispatchQueue.length && getDrivers().some((driver) => driver.status !== "offline") ? `<button class="button secondary" data-action="auto-assign-orders" type="button">Balance orders ${dispatchQueue.length}</button>` : ""}
+          <button class="button secondary" data-action="sync-channels">Sync orders</button>
+          <button class="button ghost" data-action="dispatcher-view" data-view="channels">Connect a site</button></div></details>`}
         </div>
       </div>
       <div class="panel-body">
@@ -1313,21 +1477,10 @@ function channelOrdersPanel(trips) {
         ${channelOrders.length ? `
           ${orderFilterToolbarHtml(channelOrders.length)}
           ${bulkOrderToolbarHtml(channelOrders)}
-          <div class="section-heading compact-heading">
-            <div><h3 class="panel-title">Dispatch queue</h3><p class="panel-subtitle">Orders waiting for assignment or delivery confirmation.</p></div>
-            <span class="count-chip">${dispatchQueue.length}</span>
-          </div>
           <div class="list">
-            ${dispatchQueue.length ? dispatchQueue.map(queuedOrderItem).join("") : `<div class="empty compact-empty">No orders waiting in the dispatch queue.</div>`}
+            ${dispatchQueue.map(queuedOrderItem).join("")}
           </div>
-          ${needsReview.length ? `
-            <div class="section-heading compact-heading review-heading">
-              <div><h3 class="panel-title">Needs review</h3><p class="panel-subtitle">Edit, dispatch again, or mark these orders delivered.</p></div>
-              <span class="count-chip">${needsReview.length}</span>
-            </div>
-            <div class="list">${needsReview.map(queuedOrderItem).join("")}</div>
-          ` : ""}
-        ` : `<div class="orders-empty-state"><div><strong>No orders yet</strong><span>Connect a site, sync a channel, or add a delivery manually.</span></div><button class="button" data-action="open-create-delivery" type="button">Add delivery</button></div>`}
+        ` : `<div class="orders-empty-state"><div><strong>${history ? "No delivery history yet" : "Your queue is clear"}</strong><span>${history ? "Completed deliveries will appear here." : "New orders will appear here. Completed work is in History."}</span></div>${history ? "" : '<button class="button secondary" data-action="open-create-delivery" type="button">Add delivery</button>'}</div>`}
       </div>
     </div>
   `;
@@ -1370,14 +1523,28 @@ function connectionForm(provider, title, description, fields) {
 
 function channelsManagementHtml() {
   const connections = state.snapshot?.integrations?.connections || [];
+  const apiKeys = state.snapshot?.integrations?.apiKeys || [];
   return `
     <section class="${state.dispatcherView === "channels" ? "dispatch-view active" : "dispatch-view"} dashboard-section view-section" id="channels">
       <div class="section-heading">
-        <div><p class="eyebrow">Connections</p><h2 class="section-title">Connect stores and order webhooks</h2><p class="section-subtitle">Bring supported order data into one dispatch queue without changing where customers buy.</p></div>
+        <div><p class="eyebrow">Connections</p><h2 class="section-title">Connect your tools</h2><p class="section-subtitle">Bring orders in and share delivery progress with your other software.</p></div>
         ${connections.length ? `<button class="button secondary" data-action="sync-channels" type="button">Sync all channels</button>` : ""}
       </div>
       ${connections.length ? `<div class="panel"><div class="panel-header"><div><h3 class="panel-title">Connected channels</h3><p class="panel-subtitle">Credentials are encrypted before they are saved.</p></div></div><div class="panel-body channel-list">${connections.map(channelConnectionCard).join("")}</div></div>` : ""}
       ${state.lastWebhook ? `<div class="panel webhook-result"><div class="panel-header"><div><h3 class="panel-title">Webhook ready</h3><p class="panel-subtitle">Copy this URL now. The secret token is shown only once.</p></div></div><div class="panel-body"><div class="copy-field"><code>${h(state.lastWebhook)}</code><button class="button secondary" data-action="copy" data-copy="${h(state.lastWebhook)}" type="button">Copy URL</button></div></div></div>` : ""}
+      <div class="panel"><div class="panel-header"><div><h3 class="panel-title">Rivo API</h3><p class="panel-subtitle">Connect a custom app or an HTTP step in your automation tool. Available to every workspace.</p></div><a class="button secondary" href="/api-guide.html" target="_blank" rel="noopener">API guide</a></div>
+      <div class="panel-body">
+        ${state.lastApiKey ? `<div class="webhook-result"><p>Copy this key now. It is shown only once and expires in 90 days.</p><div class="copy-field"><code>${h(state.lastApiKey)}</code><button class="button secondary" type="button" data-action="copy" data-copy="${h(state.lastApiKey)}">Copy key</button><button class="button secondary" type="button" data-action="hide-api-key">Hide</button></div></div>` : ''}
+        <form id="create-api-key" class="form-grid">
+          <div class="field full"><label for="api-key-name">Connection name</label><input id="api-key-name" name="name" class="input" maxlength="80" placeholder="Warehouse or custom app" required></div>
+          <fieldset class="field full"><legend>Permissions</legend>
+          <label><input type="checkbox" name="scope" value="orders:read" checked> Read orders and delivery status</label>
+          <label><input type="checkbox" name="scope" value="orders:write"> Create and edit queued orders</label>
+          <label><input type="checkbox" name="scope" value="drivers:read"> Read driver roster</label></fieldset>
+          <div class="field full"><button class="button" type="submit">Create API key</button></div>
+        </form>
+        ${apiKeys.map(key=>`<div class="channel-connection"><strong>${h(key.name)}</strong><p>${h(key.scopes.join(' · '))} · Expires ${h(new Date(key.expiresAt).toLocaleDateString())}</p><button class="button danger" type="button" data-action="revoke-api-key" data-key-id="${h(key.id)}">Revoke key</button></div>`).join('')}
+      </div></div>
       <div class="channel-grid">
         ${connectionForm("shopify", "Shopify", "Paste the Admin API token from your Shopify store.", `<div class="field full"><label>Store address</label><input class="input" name="storeUrl" placeholder="https://your-store.myshopify.com" required></div><div class="field full"><label>Admin API access token</label><input class="input" name="accessToken" type="password" autocomplete="off" required></div>`)}
         ${connectionForm("woocommerce", "WooCommerce", "Use read-only REST API keys from WooCommerce settings.", `<div class="field full"><label>Store address</label><input class="input" name="storeUrl" type="url" placeholder="https://store.example.com" required></div><div class="field"><label>Consumer key</label><input class="input" name="consumerKey" type="password" autocomplete="off" placeholder="ck_…" required></div><div class="field"><label>Consumer secret</label><input class="input" name="consumerSecret" type="password" autocomplete="off" placeholder="cs_…" required></div>`)}
@@ -1460,6 +1627,7 @@ function queuedDeliveryFormHtml() {
 }
 
 function driverInviteText(driver) {
+  if (driver.usesDispatcherLogin) return { label: "Uses dispatcher login", className: "available" };
   if (driver.inviteStatus === "accepted") {
     return { label: "Account active", className: "available" };
   }
@@ -1505,7 +1673,7 @@ function driverRow(driver) {
       <td>
         <div class="item-actions">
           <span class="status ${h(inviteText.className)}">${h(inviteText.label)}</span>
-          <button class="button secondary" data-action="copy-driver-invite" data-driver-id="${h(driver.id)}" type="button">${h(driverInviteActionLabel(driver))}</button>
+          ${driver.usesDispatcherLogin ? "" : `<button class="button secondary" data-action="copy-driver-invite" data-driver-id="${h(driver.id)}" type="button">${h(driverInviteActionLabel(driver))}</button>`}
           <button class="button ghost" data-action="edit-driver" data-driver-id="${h(driver.id)}" type="button">Edit profile</button>
         </div>
       </td>
@@ -1543,7 +1711,7 @@ function driverCards() {
               </div>
               <div class="driver-roster-footer">
                 <div class="item-actions">${statusPill(driver.status)}<span class="status ${h(inviteText.className)}">${h(inviteText.label)}</span><span class="item-detail">Last seen ${relativeTime(driver.lastSeenAt)}</span></div>
-                <button class="button secondary" data-action="copy-driver-invite" data-driver-id="${h(driver.id)}" type="button">${h(driverInviteActionLabel(driver))}</button>
+                ${driver.usesDispatcherLogin ? "" : `<button class="button secondary" data-action="copy-driver-invite" data-driver-id="${h(driver.id)}" type="button">${h(driverInviteActionLabel(driver))}</button>`}
               </div>
             </article>
           `;
@@ -1718,13 +1886,13 @@ function driverEditModalHtml() {
         <form id="edit-driver-form" class="form-grid modal-form">
           <input type="hidden" name="driverId" value="${h(driver.id)}">
           <div class="field"><label for="edit-driver-name">Name</label><input class="input" id="edit-driver-name" name="name" value="${h(driver.name)}" required></div>
-          <div class="field"><label for="edit-driver-email">Login email</label><input class="input" id="edit-driver-email" name="email" type="email" value="${h(driver.email || "")}" required></div>
+          <div class="field"><label for="edit-driver-email">${driver.usesDispatcherLogin ? "Uses your dispatcher login" : "Login email"}</label><input class="input" id="edit-driver-email" name="email" type="email" value="${h(driver.email || "")}" ${driver.usesDispatcherLogin ? "disabled" : "required"}></div>
           <div class="field"><label for="edit-driver-phone">Phone</label><input class="input" id="edit-driver-phone" name="phone" value="${h(driver.phone || "")}"></div>
           <div class="field"><label for="edit-driver-vehicle">Vehicle</label><input class="input" id="edit-driver-vehicle" name="vehicle" value="${h(driver.vehicle || "")}" required></div>
           <div class="field"><label for="edit-driver-shift">Shift</label><input class="input" id="edit-driver-shift" name="shift" value="${h(driver.shift || "")}"></div>
-          <div class="field"><label for="edit-driver-rate">Rate per km</label><input class="input" id="edit-driver-rate" name="defaultRate" type="number" min="0" step="0.01" value="${h(driver.defaultRate || 0)}" required></div>
+          <div class="field"><label for="edit-driver-rate">Rate per km · CAD</label><input class="input" id="edit-driver-rate" name="defaultRate" type="number" min="0" max="100" step="0.000001" value="${h(driver.defaultRate ?? "")}" placeholder="Not set"></div>
           <div class="field"><label for="edit-driver-capacity">Route capacity</label><input class="input" id="edit-driver-capacity" name="capacity" type="number" min="1" max="100" step="1" value="${h(driver.capacity || 20)}" required><small>Maximum active stops used by Smart Dispatch.</small></div>
-          <div class="field full"><label for="edit-driver-home">Paid home address</label><input class="input" id="edit-driver-home" name="homeAddress" autocomplete="street-address" value="${h(driver.homeAddress || "")}" required><small>Used for Home → Work and Depot → Home paid trips.</small></div>
+          <div class="field full"><label for="edit-driver-home">Paid home address (optional)</label><input class="input" id="edit-driver-home" name="homeAddress" autocomplete="street-address" value="${h(driver.homeAddress || "")}"><small>Used for Home → Work and Depot → Home paid trips.</small></div>
           <fieldset class="color-field field full"><legend>Map colour</legend><div class="color-swatches" role="radiogroup" aria-label="Driver map colour">${colorSwatchesHtml(driver.color)}</div></fieldset>
           <div class="modal-actions"><button class="button danger" data-action="delete-driver" data-driver-id="${h(driver.id)}" data-driver-name="${h(driver.name)}" type="button">Archive driver</button><span></span><button class="button secondary" data-action="close-driver-editor" type="button">Cancel</button><button class="button" type="submit">Save driver</button></div>
         </form>
@@ -1826,7 +1994,7 @@ function renderLogin() {
     <div class="public-shell">
       <header class="public-nav">
         <div class="brand">
-          <div class="rova-symbol public-brand-mark" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></div>
+          <div class="rova-symbol public-brand-mark" aria-hidden="true"><img src="/assets/rivo-pinwheel.svg?v=103" alt=""></div>
           <div class="brand-text">
             <div class="brand-name">Rivo</div>
             <div class="brand-subtitle">Operations platform</div>
@@ -1839,7 +2007,7 @@ function renderLogin() {
         <section class="app-gateway" aria-label="Rivo app login">
           <div class="app-gateway-copy">
             <p class="public-badge">Rivo app</p>
-            <h1 class="app-gateway-title">Run the delivery day without the chaos.</h1>
+            <h1 class="app-gateway-title">Your delivery day. In sync.</h1>
             <p class="app-gateway-subtitle">Bring orders into one queue, plan the routes, dispatch your own drivers, and keep every customer update and proof record attached to the work.</p>
             <div class="app-gateway-status" aria-label="Application status">
               <span class="app-status-dot"></span>
@@ -1848,7 +2016,7 @@ function renderLogin() {
             </div>
             <div class="app-gateway-grid" aria-label="Workspace areas">
               <div><strong>Today</strong><span>Orders, routes, assignments, and live progress.</span></div>
-              <div><strong>Driver app</strong><span>Assigned stops, directions, status, and proof.</span></div>
+              <div><strong>Driver app</strong><span>Trips, mileage, directions, and delivery proof.</span></div>
               <div><strong>Connect anything</strong><span>Any website, store, POS, webhook, or API.</span></div>
             </div>
           </div>
@@ -1921,7 +2089,7 @@ function renderDriverInvite() {
     <div class="invite-shell">
       <aside class="invite-story">
         <a class="invite-brand" href="https://floraljet.llc/" aria-label="Rivo website">
-          <span class="rova-symbol" aria-hidden="true"><img src="/assets/rova-mark.svg" alt=""></span><strong>Rivo</strong>
+          <span class="rova-symbol" aria-hidden="true"><img src="/assets/rivo-pinwheel.svg?v=103" alt=""></span><strong>Rivo</strong>
         </a>
         <div>
           <p class="public-badge">Driver access</p>
@@ -2182,10 +2350,10 @@ function onboardingSteps() {
   const company = state.snapshot?.company || {};
   const trips = getTrips();
   return [
-    { label: "Configure workspace", detail: "Company, depot, currency, and time zone", done: Boolean(company.name && company.pickupAddress && company.timeZone) },
+    { label: "Create workspace", detail: "Your business and time zone", done: Boolean(company.name && company.timeZone) },
     { label: "Add a driver", detail: "Invite at least one driver to create an account", done: getDrivers().length > 0 },
-    { label: "Add or connect orders", detail: "Enter deliveries manually or connect Shopify, WooCommerce, Wix, or a webhook", done: Boolean(state.snapshot?.integrations?.connections?.length || trips.length) },
-    { label: "Create a delivery", detail: "Import or enter the first customer delivery", done: trips.length > 0 },
+    { label: "Add first order", detail: "Enter a delivery manually or connect a store", done: trips.length > 0 },
+    { label: "Dispatch first delivery", detail: "Choose a driver and send their route", done: trips.some(trip => trip.driverId) },
     { label: "Complete a live run", detail: "Dispatch, track, and close one delivery", done: trips.some((trip) => ["delivered", "completed", "submitted", "approved"].includes(trip.status)) }
   ];
 }
@@ -2201,7 +2369,7 @@ function onboardingHtml(options = {}) {
       <section class="setup-strip" aria-label="Workspace setup progress">
         <div class="setup-strip-copy"><span class="onboarding-check">${complete}</span><div><strong>${complete} of ${steps.length} setup steps complete</strong><span>Next: ${h(nextStep?.label || "Workspace ready")}</span></div></div>
         <div class="onboarding-progress" aria-label="${percent}% complete"><span style="width:${percent}%"></span></div>
-        <button class="button secondary compact-action" data-action="dispatcher-view" data-view="settings" type="button">Finish setup</button>
+        <div class="first-run-actions"><button class="button secondary" data-action="open-driver-form" type="button">Add a Driver</button><button class="button" data-action="open-create-delivery" type="button">Add a Delivery</button><button class="button ghost" data-action="dispatcher-view" data-view="channels" type="button">Connect Your Store</button></div>
       </section>`;
   }
   return `
@@ -2230,12 +2398,13 @@ function renderSettingsHtml() {
   const notifications = company.notifications || {};
   const plans = state.snapshot?.plans || [];
   const planAccess = state.snapshot?.planAccess || plans[0] || {};
-  const status = company.subscriptionStatus === "active" ? "Active" : company.subscriptionStatus === "past_due" ? "Past due" : company.subscriptionStatus === "evaluation" ? "14-day evaluation" : "Setup";
+  const status = company.subscriptionStatus === "active" ? "Active" : company.subscriptionStatus === "past_due" ? "Past due" : company.subscriptionStatus === "evaluation" ? "7-day evaluation" : "Setup";
   const readiness = state.snapshot?.runtimeReadiness || { checks: [], readyCount: 0, totalCount: 0, requiredReady: false };
   const timeZones = ["America/Toronto", "America/Vancouver", "America/Edmonton", "America/Winnipeg", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"];
   return `
     <section class="dispatch-view${state.dispatcherView === "settings" ? " active" : ""} dashboard-section view-section" id="settings">
       <div class="settings-grid">
+        ${window.RivoAppearance?.settingsHtml() || ""}
         <div class="panel">
           <div class="panel-header"><div><h3 class="panel-title">Business profile</h3><p class="panel-subtitle">These details become the defaults for daily delivery work.</p></div></div>
           <div class="panel-body">
@@ -2257,6 +2426,7 @@ function renderSettingsHtml() {
                 <div class="field full"><label for="delivery-zones">Delivery zones</label><textarea class="textarea" id="delivery-zones" name="deliveryZones" placeholder="Downtown: M5V, M5H&#10;West: Etobicoke, Mississauga">${h(operations.deliveryZones || "")}</textarea></div>
                 <label class="setting-toggle"><input type="checkbox" name="requirePhoto" ${operations.requirePhoto ? "checked" : ""}><span><strong>Require delivery photo</strong><small>Drivers cannot complete a successful stop without one.</small></span></label>
                 <label class="setting-toggle"><input type="checkbox" name="requireSignature" ${operations.requireSignature ? "checked" : ""}><span><strong>Require signature</strong><small>Useful for regulated or high-value deliveries.</small></span></label>
+                <label class="setting-toggle full"><input type="checkbox" name="autoComplete" ${operations.autoComplete === false ? "" : "checked"}><span><strong>Auto-complete delivery stops</strong><small>Detects a 90-second stop near the current address and departure. Requires fresh GPS; photo/signature rules still apply. GPS detection does not verify a handoff. Undo an incorrect detection in History.</small></span></label>
               </div></fieldset>
               <fieldset class="settings-section full"><legend>Customer notifications</legend><div class="settings-toggle-grid">
                 <label class="setting-toggle"><input type="checkbox" name="customerTracking" ${notifications.customerTracking === false ? "" : "checked"}><span><strong>Tracking links</strong><small>Create branded customer tracking links.</small></span></label>
@@ -2270,17 +2440,17 @@ function renderSettingsHtml() {
 
         <div class="settings-stack">
           <div class="panel">
-            <div class="panel-header"><div><p class="eyebrow">Launch readiness</p><h3 class="panel-title">${readiness.requiredReady ? "Core systems ready" : "Setup needs attention"}</h3><p class="panel-subtitle">${h(readiness.readyCount)} of ${h(readiness.totalCount)} production checks are ready.</p></div><span class="status-pill ${readiness.requiredReady ? "green" : "amber"}">${readiness.requiredReady ? "Ready" : "Review"}</span></div>
-            <div class="panel-body"><div class="accounts-checklist">${readiness.checks.map((check) => `<div><strong>${check.ready ? "✓" : "○"} ${h(check.label)}</strong><span>${check.ready ? "Ready" : check.required ? "Required before unattended use" : "Recommended before scaling"}</span></div>`).join("")}</div><p class="settings-copy">Automatic email and separate Google map keys are recommended. Dispatch remains usable with the secure copy/share invitation fallback and the current map configuration.</p><div class="item-actions"><a class="button secondary" href="/api/admin/backup" download>Download operational backup</a><a class="button ghost" href="mailto:hello@floraljet.llc?subject=Rivo%20production%20setup">Get setup help</a></div></div>
+            <div class="panel-header"><div><p class="eyebrow">System configuration</p><h3 class="panel-title">${readiness.requiredReady ? "Core services configured" : "Setup needs attention"}</h3><p class="panel-subtitle">${h(readiness.readyCount)} of ${h(readiness.totalCount)} services configured—not an end-to-end launch certification.</p></div><span class="status-pill ${readiness.requiredReady ? "green" : "amber"}">${readiness.requiredReady ? "Configured" : "Review"}</span></div>
+            <div class="panel-body"><div class="accounts-checklist">${readiness.checks.map((check) => `<div><strong>${check.ready ? "✓" : "○"} ${h(check.label)}</strong><span>${check.ready ? "Configured" : check.id === "invite-email" ? "Manual invite links only; email is not connected" : check.required ? "Required before unattended use" : "Recommended before scaling"}</span></div>`).join("")}</div><p class="settings-copy">Configuration does not verify a real email receipt, phone GPS, camera upload, or locked-screen trip. Use the native iPhone/Android companion for background mileage; verify a measured drive before relying on it.</p><p class="settings-copy">This is one business workspace. Separate customer businesses need their own isolated workspace; do not add them as drivers in this one.</p><div class="item-actions"><a class="button secondary" href="/api/admin/backup" download>Download operational backup</a><a class="button ghost" href="mailto:hello@floraljet.llc?subject=Rivo%20production%20setup">Get setup help</a></div></div>
           </div>
           <div class="panel">
             <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(planAccess.name || company.plan || "Starter")}</h3><p class="panel-subtitle">${planAccess.monthlyPrice ? `$${h(planAccess.monthlyPrice)}/month · ` : ""}Dedicated Rivo workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
-            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">New workspaces begin with a guided 14-day evaluation. Billing is activated by a reviewed Rivo invoice. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rivo%20billing">Billing support</a></div></div>
+            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">New workspaces begin with a guided 7-day evaluation. Billing is activated by a reviewed Rivo invoice. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rivo%20billing">Billing support</a></div></div>
           </div>
           <div class="panel network-readiness-card"><div class="panel-header"><div><p class="eyebrow">Future network</p><h3 class="panel-title">My Drivers + Rivo Driver</h3><p class="panel-subtitle">The fulfillment model is ready for external network drivers without pretending a marketplace exists today.</p></div><span class="status assigned">Coming later</span></div><div class="panel-body"><div class="fulfillment-choice-preview"><div class="active"><strong>My Drivers</strong><span>Your employed or contracted fleet.</span></div><div><strong>Rivo Driver</strong><span>Quote, accept, track, and platform-fee workflow prepared for a future network.</span></div></div><p class="settings-copy">Until the Rivo network launches, use saved courier partners for third-party coverage.</p><button class="button secondary" data-action="dispatcher-view" data-view="drivers" type="button">Manage courier partners</button></div></div>
           <div class="panel">
             <div class="panel-header"><div><h3 class="panel-title">Support</h3><p class="panel-subtitle">Get help with onboarding, integrations, or live operations.</p></div></div>
-            <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "hello@floraljet.llc")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "hello@floraljet.llc")}?subject=Rivo%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button></div></div>
+            <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "hello@floraljet.llc")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "hello@floraljet.llc")}?subject=Rivo%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button><button class="button secondary" data-action="request-account-deletion" type="button">Request account deletion</button></div></div>
           </div>
         </div>
       </div>
@@ -2459,8 +2629,10 @@ function dashboardWidgetDefinition(id) {
 
 function dashboardWidgetHtml(id, content) {
   const definition = dashboardWidgetDefinition(id);
-  if (!definition || !content || state.dashboardLayout.hidden.includes(id)) return "";
-  const width = state.dashboardLayout.widths[id] === "wide" ? "wide" : "half";
+  const focusedWidgets = state.operationsPane === "map" ? ["map"] : state.operationsPane === "active" ? ["issues", "active"] : state.operationsPane === "history" ? ["orders"] : ["issues", "orders", ...(state.routePreviewOpen ? ["map"] : []), "create"];
+  const focused = !state.dashboardCustomizing && state.operationsPane !== "custom";
+  if (!definition || !content || (focused ? !focusedWidgets.includes(id) || (id === "create" && state.dashboardLayout.hidden.includes(id)) : state.dashboardLayout.hidden.includes(id))) return "";
+  const width = focused || state.dashboardLayout.widths[id] === "wide" ? "wide" : "half";
   return `
     <div class="dashboard-widget dashboard-widget-${width}${state.dashboardCustomizing ? " is-customizing" : ""}" data-dashboard-widget="${h(id)}">
       <div class="dashboard-widget-controls" aria-label="Move or resize ${h(definition.label)}">
@@ -2497,21 +2669,54 @@ function dashboardCustomizerHtml() {
     </section>`;
 }
 
+function pickupOrdersHtml() {
+  const orders = getTrips().filter(trip => isNonDeliveryOrder(trip) && !outsideDailyOrderWindow(trip))
+    .sort((a, b) => new Date(b.source?.createdDate || b.importedAt || 0) - new Date(a.source?.createdDate || a.importedAt || 0));
+  return `<div class="panel orders-panel"><div class="panel-header"><div><h2 class="panel-title">Pickups & other orders</h2>
+    <p class="panel-subtitle">Wix orders from the past 24 hours. Pickups, carrier shipments, and fulfilled orders stay out of driver routes until you confirm.</p></div>
+    <button class="button secondary" data-action="sync-channels" type="button">Sync orders</button></div><div class="panel-body">
+    ${orders.length ? `<div class="list">${orders.map(trip => {
+      const method = fulfillmentMethodForTrip(trip);
+      const label = ({ "customer-pickup": "Customer pickup", "carrier-shipping": "Carrier shipping", "fulfillment-review": "Wix marked fulfilled" })[method] || "Pickup or delivery?";
+      const canDecide = !trip.startedAt && !trip.proof && !trip.submittedAt && !(trip.distanceKm > 0) && !trip.courier?.isOpen;
+      return `<article class="item order-card"><div class="order-card-head"><div><p class="item-title">${h(trip.customerName)}</p>
+        <p class="item-detail">Wix order #${h(trip.source?.orderNumber || trip.source?.orderId || "")} · ${relativeTime(trip.source?.createdDate || trip.importedAt)}</p></div>
+        <span class="status ${method === "customer-pickup" ? "available" : "exception"}">${h(label)}</span></div>
+        ${trip.source?.pickupAddress ? `<p class="item-detail">Pickup location: ${h(trip.source.pickupAddress)}</p>` : ""}
+        <p class="item-detail">${h(trip.source?.shippingTitle || (method === "customer-pickup" ? "No driver needed" : "Wix has no delivery address or confirmed pickup method. An in-store sale can still need delivery."))}</p>
+        <p class="item-detail">Wix fulfillment: ${h(({ FULFILLED: "Fulfilled", NOT_FULFILLED: "Not fulfilled", PARTIALLY_FULFILLED: "Partially fulfilled" })[trip.source?.fulfillmentStatus] || trip.source?.fulfillmentStatus || "Unknown")} · ${method === "customer-pickup" ? "No driver dispatch required" : "Not in the driver queue"}</p>
+        ${method === "carrier-shipping" ? '<p class="item-detail">A carrier service is selected in Wix. Only add this to a driver route if your team is actually delivering it.</p>' : method === "fulfillment-review" ? '<p class="item-detail">Wix says this order is fulfilled. Rivo has not invented a delivery time, proof, or mileage. Add it to the queue only if a driver delivery is still needed.</p>' : ""}
+        ${canDecide && method !== "customer-pickup" ? `${method === "needs-details" ? `<div class="item-actions"><button class="button secondary" data-action="set-order-fulfillment" data-trip-id="${h(trip.id)}" data-fulfillment="customer-pickup" type="button">Customer pickup</button></div>` : ""}
+          <details class="order-editor"><summary>Needs delivery</summary><div class="form-grid compact"><div class="field full"><label for="fulfillment-address-${h(trip.id)}">Delivery address</label><input class="input" id="fulfillment-address-${h(trip.id)}" value="${h(trip.destination === "Delivery address missing" ? "" : trip.destination)}" autocomplete="street-address"></div>
+          <div class="field full"><button class="button" data-action="set-order-fulfillment" data-trip-id="${h(trip.id)}" data-fulfillment="delivery" type="button">Add to delivery queue</button></div></div></details>` : ""}
+        ${trip.notes ? `<details class="order-proof"><summary>Order details</summary><p class="item-detail">${h(trip.notes).replaceAll("\n", "<br>")}</p></details>` : ""}
+        ${trip.startedAt || trip.proof ? '<p class="item-detail">A previous delivery record is preserved. No new driver dispatch is allowed for this order.</p>' : ""}
+        ${trip.proof ? `<details class="order-proof"><summary>Previous delivery record</summary>${proofRecordHtml(trip, { compact: true })}</details>` : ""}
+      </article>`;
+    }).join("")}</div>` : '<div class="orders-empty-state"><div><strong>No pickups or orders needing details</strong><span>Confirmed Wix pickups and orders with unclear fulfillment appear here.</span></div></div>'}
+    </div></div>`;
+}
+
 function dashboardBoardHtml(widgetContent) {
+  if (!state.dashboardCustomizing && state.operationsPane !== "custom") {
+    if (state.operationsPane === "pickups") return `<section class="dispatch-history">${pickupOrdersHtml()}</section>`;
+    if (state.operationsPane === "history") return `<section class="dispatch-history">${widgetContent.orders}</section>`;
+    if (state.operationsPane === "map") return `<section class="dispatch-map-view">${widgetContent.map}${fleetVisibilityHtml()}</section>`;
+    return `<section class="dispatch-workbench" aria-label="Dispatch workspace"><div class="dispatch-order-column">${widgetContent.issues}${state.operationsPane === "active" ? widgetContent.active : widgetContent.orders}${state.dashboardLayout.hidden.includes("create") ? "" : widgetContent.create}</div><aside class="dispatch-route-column">${state.operationsPane === "orders" ? routePlanPanelHtml() : ""}${state.routePreviewHidden ? '<button class="button secondary" data-action="show-route-preview" type="button">Show route map</button>' : widgetContent.map}${fleetVisibilityHtml()}</aside></section>`;
+  }
   const ordered = state.dashboardLayout.order
     .map((id) => dashboardWidgetHtml(id, widgetContent[id]))
     .filter(Boolean)
     .join("");
-  return `<section class="dashboard-board${state.dashboardCustomizing ? " is-customizing" : ""}" aria-label="Customizable operations dashboard">${ordered}</section>`;
+  return `<section class="dashboard-board${state.dashboardCustomizing ? " is-customizing" : ""}${!state.dashboardCustomizing && state.operationsPane === "orders" && state.routePreviewOpen ? " with-route-preview" : ""}" aria-label="Customizable operations dashboard">${ordered}</section>`;
 }
 
 function operationsFlowNavHtml(trips, active, selectedPreview) {
   const queued = queuedTrips();
   return `
-    <nav class="operations-flowbar" aria-label="Dispatch workflow">
-      <a href="#orders"><span>1</span><strong>Orders</strong><small>${queued.length} waiting</small></a>
-      <a href="#route-preview"><span>2</span><strong>Route</strong><small>${selectedPreview.length ? `${selectedPreview.length} selected` : "Select stops"}</small></a>
-      <a href="#active-deliveries"><span>3</span><strong>On the road</strong><small>${active.length} active</small></a>
+    <nav class="dispatch-pane-tabs" aria-label="Dispatch workspace">
+      ${[["orders", "Orders", queued.length], ["active", "Active", active.length], ["pickups", "Pickups & other", trips.filter(trip => isNonDeliveryOrder(trip) && !outsideDailyOrderWindow(trip)).length], ["history", "History", ""], ["map", "Map", ""]].map(([pane, label, count]) => `<button class="button ${state.operationsPane === pane ? "" : "ghost"}" data-action="operations-pane" data-pane="${pane}" aria-pressed="${state.operationsPane === pane}" type="button">${label}${count !== "" ? ` <span class="pane-count">${count}</span>` : ""}</button>`).join("")}
+      <button class="button ghost layout-view-button" data-action="operations-pane" data-pane="custom" aria-pressed="${state.operationsPane === "custom"}" type="button">My layout</button>
     </nav>`;
 }
 
@@ -2531,6 +2736,7 @@ function renderDispatcher() {
     renderLogin();
     return;
   }
+  if (state.dispatcherView === "my-mileage") { renderMyMileage(); return; }
   pruneSelections();
   const trips = getTrips();
   const active = activeTrips();
@@ -2540,7 +2746,8 @@ function renderDispatcher() {
   const weeklyTotals = reportTotals(weekly);
   const submitted = weekly.filter((trip) => trip.status === "submitted");
   const view = state.dispatcherView;
-  const companyName = state.snapshot?.company?.name || "Delivery operations";
+  const company = state.snapshot?.company || {};
+  const companyName = company.name || "Delivery operations";
   const workspaceEyebrow = companyName.toLowerCase() === "rivo" ? "Rivo workspace" : `Rivo · ${companyName}`;
   const viewTitle = view === "drivers" ? "Delivery team" : view === "analytics" ? "Operations analytics" : view === "channels" ? "Connections" : view === "accounts" ? "Accounts" : view === "reports" ? "Reports" : view === "settings" ? "Settings" : "Today";
   const viewSubtitle = view === "drivers"
@@ -2561,12 +2768,12 @@ function renderDispatcher() {
   const content = `
     <div class="topbar dispatch-topbar">
       <div>
-        <p class="eyebrow">${h(workspaceEyebrow)}</p>
+        ${view === "operations" ? "" : `<p class="eyebrow">${h(workspaceEyebrow)}</p>`}
         <h1 class="page-title">${viewTitle}</h1>
-        <p class="page-subtitle">${viewSubtitle}</p>
+        ${view === "operations" ? "" : `<p class="page-subtitle">${viewSubtitle}</p>`}
       </div>
       <div class="toolbar">
-        ${view === "operations" ? `<button class="button ghost dashboard-customize-button${state.dashboardCustomizing ? " active" : ""}" data-action="toggle-dashboard-customizer" type="button" aria-pressed="${state.dashboardCustomizing}" title="Arrange dashboard sections">${state.dashboardCustomizing ? "Done" : "Arrange"}</button><button class="button" data-action="open-create-delivery" type="button">New delivery</button>` : ""}
+        ${view === "operations" ? `<button class="button ghost dashboard-customize-button${state.dashboardCustomizing ? " active" : ""}" data-action="toggle-dashboard-customizer" type="button" aria-pressed="${state.dashboardCustomizing}" title="Arrange dashboard sections" ${state.operationsPane !== "custom" && !state.dashboardCustomizing ? "hidden" : ""}>${state.dashboardCustomizing ? "Done" : "Arrange"}</button><button class="button" data-action="open-create-delivery" type="button">New delivery</button>` : ""}
         ${view === "drivers" ? `<button class="button secondary" data-action="open-courier-form" type="button">Add courier</button><button class="button" data-action="open-driver-form" type="button">Add driver</button>` : ""}
         ${view === "channels" ? `<button class="button" data-action="sync-channels" type="button">Sync all</button>` : ""}
         ${view !== "operations" ? `<button class="button secondary mobile-secondary-action" data-action="dispatcher-view" data-view="operations" type="button">Back to today</button>` : ""}
@@ -2576,7 +2783,10 @@ function renderDispatcher() {
     ${["channels", "accounts", "settings"].includes(view) ? workspaceToolsNav() : ""}
 
     <div class="${viewClass("operations")}">
+    ${company.subscriptionStatus === "evaluation" && company.evaluationEndsAt ? `<div class="trial-strip"><span>${Math.max(0,Math.ceil((Date.parse(company.evaluationEndsAt)-Date.now())/86400000))} days left in your Rivo trial</span><button data-action="dispatcher-view" data-view="settings" class="button ghost" type="button">View plan</button></div>`:""}
+    ${view === "operations" ? onboardingHtml({compact:true}) : ""}
     ${dashboardCustomizerHtml()}
+    <div class="dispatch-day-strip"><div><span>Waiting</span><strong>${queuedTrips().length}</strong></div><div><span>On the road</span><strong>${active.length}</strong></div><div><span>Delivered today</span><strong>${trips.filter(trip => (trip.deliveryOutcomeStatus === "delivered" || ["completed", "delivered"].includes(trip.status)) && trip.endedAt && new Date(trip.endedAt).toDateString() === new Date().toDateString()).length}</strong></div><div><span>Needs attention</span><strong>${trips.filter(trip => trip.status === "exception").length}</strong></div></div>
     ${operationsFlowNavHtml(trips, active, selectedPreview)}
     ${dashboardBoardHtml({
       overview: todayAtGlanceHtml(trips),
@@ -2584,10 +2794,9 @@ function renderDispatcher() {
       issues: exceptionPanelHtml(trips),
       active: `<div class="dashboard-widget-stack">${courierRequestsPanelHtml()}${activeDeliveriesPanelHtml(active)}</div>`,
       orders: `<section class="operations-orders" id="orders" aria-label="Order queue">${channelOrdersPanel(trips)}</section>`,
-      map: `<div class="panel route-preview-panel" id="route-preview"><div class="panel-header"><div><h2 class="panel-title">Route preview</h2><p class="panel-subtitle">Select orders to preview their route. Active driver locations appear automatically.</p></div></div><div class="panel-body">${renderMapBlock("dispatcher-map", mapTrips, { label: selectedPreview.length ? "Selected route" : active.length ? "Live fleet" : "Recent routes" })}</div></div>`,
+      map: `<div class="panel route-preview-panel" id="route-preview"><div class="panel-header"><div><h2 class="panel-title">Route preview</h2><p class="panel-subtitle">${selectedPreview.length ? `${state.selectedOrderIds.size} selected orders` : "Planned stops · GPS not required"}</p></div>${state.operationsPane === "orders" ? '<button class="button ghost" type="button" data-action="close-route-preview">Close map</button>' : ""}</div><div class="panel-body">${renderMapBlock("dispatcher-map", mapTrips, { label: selectedPreview.length ? "Selected route" : active.length ? "Planned routes" : queuedTrips().length ? "Waiting orders" : "Route map" })}</div></div>`,
       create: `<details class="panel manage-panel create-delivery-panel" id="create-delivery"><summary class="manage-summary"><span><span class="panel-title">Create delivery</span><span class="panel-subtitle">Add a manual delivery only when it is not coming from a connected site.</span></span><span class="summary-control" aria-hidden="true">+</span></summary><div class="panel-body">${queuedDeliveryFormHtml()}</div></details>`
     })}
-    ${onboardingHtml({ compact: true })}
     </div>
 
     <section class="${viewClass("drivers")} dashboard-section view-section" id="drivers">
@@ -2632,7 +2841,7 @@ function renderDispatcher() {
               </div>
               <div class="field full">
                 <label for="driver-home">Home address</label>
-                <input class="input" id="driver-home" name="homeAddress" autocomplete="street-address" placeholder="Used for paid Home → Work and Depot → Home trips" required>
+                <input class="input" id="driver-home" name="homeAddress" autocomplete="street-address" placeholder="Optional · for paid commute trips">
               </div>
               <div class="field">
                 <label for="driver-shift">Shift</label>
@@ -2640,16 +2849,16 @@ function renderDispatcher() {
               </div>
               <div class="field">
                 <label for="driver-vehicle">Vehicle</label>
-                <input class="input" id="driver-vehicle" name="vehicle" required>
+                <input class="input" id="driver-vehicle" name="vehicle" placeholder="Optional">
               </div>
               <div class="field">
                 <label for="driver-rate">Default rate</label>
-                <input class="input" id="driver-rate" name="defaultRate" type="number" min="0" step="0.01" value="1.25" required>
+                <input class="input" id="driver-rate" name="defaultRate" type="number" min="0" step="0.01" placeholder="Optional · agreed rate per km">
               </div>
               <div class="field">
                 <label for="driver-capacity">Route capacity</label>
                 <input class="input" id="driver-capacity" name="capacity" type="number" min="1" max="100" step="1" value="20" required>
-                <small>Maximum active stops used by Smart Dispatch.</small>
+                <small>Maximum active stops for this driver.</small>
               </div>
               <fieldset class="color-field field full">
                 <legend>Map colour</legend>
@@ -2687,6 +2896,7 @@ function renderDispatcher() {
     ${renderSettingsHtml()}
 
     <section class="${viewClass("reports")} dashboard-section view-section" id="reports">
+      ${mileageUI.dispatchHtml()}
       <div class="panel">
         <div class="panel-header">
           <div>
@@ -2729,6 +2939,7 @@ function renderDispatcher() {
     ${driverEditModalHtml()}
     ${courierPartnerEditModalHtml()}
     ${courierRequestModalHtml()}
+    ${state.createDeliveryOpen ? `<div class="modal-backdrop" data-modal-backdrop><section class="modal-panel" role="dialog" aria-modal="true" aria-label="New delivery"><div class="panel-header"><h2 class="panel-title">New delivery</h2><button class="button ghost" data-action="close-create-delivery" type="button">Close</button></div><div class="panel-body">${queuedDeliveryFormHtml()}</div></section></div>`:""}
   `;
 
   app.innerHTML = shellHtml(content);
@@ -2796,27 +3007,33 @@ function renderDriver() {
   const todayTrips = driverTrips.filter((trip) => new Date(trip.startedAt).toDateString() === todayKey);
   const todayTotals = reportTotals(todayTrips);
   const mapTrips = combinedRouteTrip ? [combinedRouteTrip] : [];
+  state.driverMapTrips = mapTrips;
   const isPublishing = currentTrip && state.publishTripId === currentTrip.id && (state.gpsWatchId !== null || state.simTimer !== null);
-  const trackingMessage = isPublishing
-    ? "Location sharing is on. Dispatch and customers with a link can see your current position."
-    : "Location sharing is off. It only starts when you choose Start location sharing.";
+  const autoSharing = currentTrip && state.snapshot?.mileage?.tracking?.enabled && state.snapshot.mileage.tracking.lastFixAt && Date.now() - new Date(state.snapshot.mileage.tracking.lastFixAt).getTime() < 120000;
+  const nativeDriver = /RivoIOS\/|RivoAndroid\//.test(navigator.userAgent);
+  const trackingMessage = autoSharing ? "Automatic mileage is updating your active delivery location. Manage auto-track in Settings."
+    : nativeDriver ? "Enable Auto-track in the app to share live delivery location. Check tracking settings for location permission and GPS status."
+    : isPublishing
+    ? (state.gpsMessage || "Waiting for a GPS fix. Keep Rivo open while delivering.")
+    : "Location sharing is off. Tap Share live location and keep Rivo open. For locked-screen tracking, use the native app’s Auto-track.";
 
   const content = `
     <div class="topbar driver-topbar">
       <div class="driver-strip">
         <div class="avatar" style="background:${h(driver.color)}22;color:${h(driver.color)}">${h(initials(driver.name))}</div>
         <div>
-          <p class="eyebrow">Driver app</p>
+          <p class="eyebrow">${currentTrip ? "Today’s route" : "Your mileage"}</p>
           <h1 class="page-title">Hi, ${h(driver.name.split(" ")[0])}</h1>
-          <p class="page-subtitle">${h(driver.vehicle)} · ${h(driver.shift || "Shift not set")}</p>
+          <p class="page-subtitle">${h(driver.vehicle || "Rivo driver")}</p>
         </div>
       </div>
     </div>
 
-    <section class="driver-section" id="today">
+    ${assignmentAlerts.bannerHtml(state.snapshot)}
+    <section class="driver-section" id="today" hidden>
       <div class="section-heading">
         <div>
-          <h2 class="section-title">Today</h2>
+          <h2 class="section-title">Deliveries</h2>
           <p class="section-subtitle">${todayTrips.length} trip${todayTrips.length === 1 ? "" : "s"} · ${formatKm(todayTotals.distanceKm)}</p>
         </div>
       </div>
@@ -2825,8 +3042,8 @@ function renderDriver() {
         <div class="panel-header">
           <div>
               <p class="eyebrow">${currentTrip ? "Current assignment" : "Ready when you are"}</p>
-              <h2 class="panel-title">${currentTrip ? h(currentTrip.customerName) : "Start a trip"}</h2>
-              <p class="panel-subtitle">${currentTrip ? h(activeRouteTrips.length > 1 ? `${activeRouteTrips.length} optimized delivery stops` : routeSummary(currentTrip)) : "Enter the route once, then drive. Every trip is logged as business mileage."}</p>
+              <h2 class="panel-title">${currentTrip ? "Today’s route" : "No delivery assigned"}</h2>
+              <p class="panel-subtitle">${currentTrip ? `${sortedActiveTrips.length} stop${sortedActiveTrips.length === 1 ? "" : "s"} remaining` : "Your next assigned delivery will appear here. Automatic mileage is reviewed separately in Trips."}</p>
           </div>
           ${currentTrip ? statusPill(currentTrip.status) : ""}
         </div>
@@ -2835,26 +3052,25 @@ function renderDriver() {
             currentTrip
               ? `
                   <div class="driver-current-trip" data-proof-draft>
-                    ${renderMapBlock("driver-map", [combinedRouteTrip], { small: true, label: isPublishing ? "Location sharing on" : "Trip route" })}
-                    <div class="driver-route-summary">${routeStopLinesHtml(combinedRouteTrip)}</div>
                     <div class="next-stop-card">
                       <div><p class="eyebrow">Next delivery</p><h3>${h(currentTrip.customerName)}</h3><p>${h(currentTrip.destination)}</p></div>
-                      <div class="next-stop-meta"><span>${currentTrip.etaMinutes ? `${h(currentTrip.etaMinutes)} min ETA` : "ETA updates after routing"}</span><span>${currentTrip.distanceKm ? formatKm(currentTrip.distanceKm) : "Distance calculating"}</span></div>
+                      <div class="next-stop-meta">${currentTrip.etaMinutes ? `<span>${h(currentTrip.etaMinutes)} min ETA</span>` : ''}${currentTrip.distanceKm ? `<span>${formatKm(currentTrip.distanceKm)}</span>` : ''}</div>
                       <div class="next-stop-actions">
                         <a class="button" href="${h(googleMapsDirectionsUrl(currentTrip, { navigate: true, currentLocation: true }))}" target="_blank" rel="noreferrer">Navigate</a>
                         ${currentTrip.customerPhone ? `<a class="button secondary" href="tel:${h(currentTrip.customerPhone)}">Call customer</a><a class="button secondary" href="sms:${h(currentTrip.customerPhone)}">Message</a>` : ""}
                       </div>
                       ${currentTrip.notes ? `<div class="next-stop-note"><strong>Delivery notes</strong><span>${h(currentTrip.notes)}</span></div>` : ""}
                     </div>
-                    <div class="privacy-note ${isPublishing ? "sharing" : ""}">
+                    <div class="privacy-note ${isPublishing || autoSharing ? "sharing" : ""}">
                       <span class="privacy-dot"></span>
                       <span>${h(trackingMessage)}</span>
                   </div>
                     <div class="driver-action-stack">
-                      <button class="button driver-primary-action" data-action="start-gps" data-trip-id="${h(currentTrip.id)}" ${isPublishing ? "disabled" : ""}>${isPublishing ? "Location sharing is on" : "Start location sharing"}</button>
+                      ${isPublishing || autoSharing || nativeDriver ? "" : `<button class="button secondary driver-primary-action" data-action="start-gps" data-trip-id="${h(currentTrip.id)}">Share live location</button>`}
                       ${isPublishing ? `<button class="button secondary" data-action="stop-tracking">Pause location sharing</button>` : ""}
-                      <a class="button secondary" href="${h(googleMapsDirectionsUrl(combinedRouteTrip, { navigate: true, currentLocation: true }))}" target="_blank" rel="noreferrer">Navigate remaining route</a>
                   </div>
+                  ${state.snapshot?.company?.operations?.autoComplete === false ? "" : `<p class="item-detail">${currentTrip.autoDelivery?.status === "proof-required" ? "Stop detected. Add the required proof to finish this delivery." : (currentTrip.stops?.length || 2) > 2 ? "This order contains several addresses; confirm the delivery after the final stop." : currentTrip.autoDelivery?.status === "address-unavailable" ? "Address could not be located. Confirm this delivery manually." : "Auto-completion is on: stop at the address, then continue driving. No completion tap is needed unless proof is required."}</p>`}
+                  <details class="driver-delivery-outcome"><summary class="button success driver-primary-action">Delivered / report issue</summary><div class="delivery-outcome-fields">
                   <div class="field">
                       <label for="trip-notes-${h(currentTrip.id)}">Optional trip note</label>
                       <textarea class="textarea" id="trip-notes-${h(currentTrip.id)}" placeholder="Waiting time, delivery details, or route notes">${h(currentTrip.notes || "")}</textarea>
@@ -2914,10 +3130,16 @@ function renderDriver() {
                           </div>
                         </div>
                       </div>` : `<div class="empty compact-empty">Photo and signature storage is being connected. Recipient, time, location, notes, and outcome will still be recorded.</div>`}
-                    <button class="button success driver-primary-action" data-action="complete-trip" data-trip-id="${h(currentTrip.id)}">Complete stop</button>
+                    <button class="button success driver-primary-action" data-action="complete-trip" data-trip-id="${h(currentTrip.id)}">Confirm & next stop</button>
+                  </div></details>
+                  <details class="driver-route-preview"><summary>Route & remaining stops (${sortedActiveTrips.length})</summary>
+                    ${renderMapBlock("driver-map", [combinedRouteTrip], { small: true, label: isPublishing ? "Location sharing on" : "Trip route" })}
+                    <div class="driver-route-summary">${routeStopLinesHtml(combinedRouteTrip)}</div>
+                    <a class="button secondary" href="${h(googleMapsDirectionsUrl(combinedRouteTrip, { navigate: true, currentLocation: true }))}" target="_blank" rel="noreferrer">Navigate remaining route</a>
+                  </details>
                 </div>
               `
-              : startTripFormHtml("driver", driver.id)
+              : `<p class="empty">Your delivery assignments appear here. Auto-track records your driving separately—there is no mileage trip to start.</p><details><summary>Create a delivery manually</summary>${startTripFormHtml("driver", driver.id)}</details>`
           }
         </div>
       </div>
@@ -2950,13 +3172,16 @@ function renderDriver() {
     </section>
 
     <section class="driver-section" id="trips">
+      ${mileageUI.summaryHtml()}
+      ${mileageUI.tripsHtml()}
+      <details class="mileage-legacy"><summary>Assigned delivery records and payments</summary>
       <div class="section-heading">
         <div><p class="eyebrow">Trip inbox</p><h2 class="section-title">Trips</h2><p class="section-subtitle">Review recent routes and fix anything that needs attention.</p></div>
-        <span class="count-chip">${needsReview.length} need${needsReview.length === 1 ? "s" : ""} review</span>
+        <span class="count-chip">${needsReview.length} delivery record${needsReview.length === 1 ? "" : "s"}</span>
       </div>
       <div class="driver-inbox-grid">
         <div class="panel">
-          <div class="panel-header"><div><h3 class="panel-title">Needs review</h3><p class="panel-subtitle">Submit these trips when the details look right.</p></div></div>
+          <div class="panel-header"><div><h3 class="panel-title">Completed deliveries &amp; corrections</h3><p class="panel-subtitle">These are delivery payment records, separate from your automatic mileage report.</p></div></div>
           <div class="panel-body">${tripLogCards(needsReview, { driverActions: true })}</div>
         </div>
         <div class="panel">
@@ -2964,9 +3189,12 @@ function renderDriver() {
           <div class="panel-body">${tripLogCards(driverTrips.filter((trip) => !["completed", "rejected", "failed"].includes(trip.status)))}</div>
         </div>
       </div>
+      </details>
     </section>
 
-    <section class="driver-section" id="report">
+    <section class="driver-section" id="report" hidden>
+      ${mileageUI.reportHtml()}
+      <details class="mileage-legacy"><summary>Delivery payment summary</summary>
       <div class="section-heading">
         <div><p class="eyebrow">This week</p><h2 class="section-title">Mileage report</h2><p class="section-subtitle">Check the week, then send it to dispatch for approval.</p></div>
       </div>
@@ -2982,20 +3210,24 @@ function renderDriver() {
           <p class="privacy-copy">Only completed business trips are sent to dispatch. You can continue to see your submitted history here.</p>
         </div>
       </div>
+      </details>
     </section>
 
-    <section class="driver-section" id="profile">
-      <div class="section-heading"><div><p class="eyebrow">Account</p><h2 class="section-title">Profile</h2></div></div>
+    <section class="driver-section" id="profile" hidden>
+      <div class="section-heading"><div><p class="eyebrow">Account</p><h2 class="section-title">Settings</h2></div></div>
+      ${mileageUI.settingsHtml()}
+      ${assignmentAlerts.settingsHtml(state.snapshot)}
       <div class="panel driver-profile-card">
         <div class="panel-body">
           <div class="driver-profile-row"><span>Driver</span><strong>${h(driver.name)}</strong></div>
           <div class="driver-profile-row"><span>Vehicle</span><strong>${h(driver.vehicle)}</strong></div>
           <div class="driver-profile-row"><span>Shift</span><strong>${h(driver.shift || "Not set")}</strong></div>
           <div class="driver-profile-row"><span>Phone</span><strong>${h(driver.phone || "Not set")}</strong></div>
-          <div class="privacy-note"><span class="privacy-dot"></span><span>Rivo shares your live location only while you have location sharing turned on for an active trip.</span></div>
+          <div class="privacy-note"><span class="privacy-dot"></span><span>Automatic mileage records all detected drives after you enable it. Personal trips stay private. Live delivery location is shared only during assigned active deliveries while location sharing or automatic tracking is enabled.</span></div>
           <div class="driver-action-stack">
-            ${isStandalone() ? "" : `<button class="button secondary" data-action="install-app" type="button">Install driver app</button>`}
+            ${isStandalone() ? "" : `<button class="button secondary" data-action="install-app" type="button">Add web shortcut (not background tracking)</button>`}
             <button class="button secondary" data-action="logout">Log out</button>
+            <button class="button secondary" data-action="request-account-deletion" type="button">Request account deletion</button>
           </div>
         </div>
       </div>
@@ -3005,7 +3237,7 @@ function renderDriver() {
   app.innerHTML = shellHtml(content);
   requestAnimationFrame(() => {
     syncSectionNavigation();
-    drawMap("driver-map", mapTrips);
+    mileageUI.mount();
   });
 }
 
@@ -3159,8 +3391,13 @@ function renderCustomer() {
   requestAnimationFrame(() => drawMap("customer-map", [trip], { customer: true }));
 }
 
+function renderSignup() {
+  app.innerHTML=`<main class="signup-shell"><a class="signup-brand" href="https://floraljet.llc/">Rivo</a><section class="signup-card"><div><p class="eyebrow">Your first delivery starts here</p><h1>Start your free trial.</h1><p>Create a workspace for your business. Add your first delivery in minutes.</p></div>${state.loginError ? `<div class="lead-message error" role="alert">${h(state.loginError)}</div>`:""}<form id="signup-form" class="form-grid"><div class="field full"><label for="signup-name">Your name</label><input id="signup-name" class="input" name="name" autocomplete="name" maxlength="120" required></div><div class="field full"><label for="signup-company">Company name</label><input id="signup-company" class="input" name="companyName" autocomplete="organization" minlength="2" maxlength="120" required></div><div class="field full"><label for="signup-email">Email</label><input id="signup-email" class="input" name="email" type="email" autocomplete="email" required></div><div class="field full"><label for="signup-password">Password</label><input id="signup-password" class="input" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required><small>At least 8 characters.</small></div><div class="field full"><label for="signup-timezone">Time zone</label><select id="signup-timezone" class="select" name="timeZone"><option value="America/Toronto">Toronto / Eastern</option><option value="America/Vancouver">Vancouver / Pacific</option><option value="America/Edmonton">Edmonton / Mountain</option><option value="America/Winnipeg">Winnipeg / Central</option><option value="America/Halifax">Halifax / Atlantic</option><option value="America/St_Johns">St. John’s / Newfoundland</option></select></div><button class="button" type="submit">Create workspace</button></form><p class="signup-note">7 days free · No credit card required</p><p>Already have an account? <a href="/operations">Sign in</a></p></section></main>`;
+}
+
 function render() {
   state.route = parseRoute();
+  if (window.location.pathname === "/signup" && !state.auth) { renderSignup(); return; }
   if (state.route.name === "customer") {
     renderCustomer();
     return;
@@ -3193,8 +3430,8 @@ function clearGoogleMapView(view) {
     if (polyline?.setMap) polyline.setMap(null);
   }
   for (const marker of view.markers || []) {
-    if ("map" in marker) marker.map = null;
-    else if (marker?.setMap) marker.setMap(null);
+    if (typeof marker?.setMap === "function") marker.setMap(null);
+    else if (marker && "map" in marker) marker.map = null;
   }
   view.polylines = [];
   view.markers = [];
@@ -3211,17 +3448,63 @@ function deactivateGoogleMap(canvasId, message = "") {
   }
 }
 
+function mapViewportKey(trips, options = {}) {
+  if (!trips.length) return options.planned ? `depot:${companyPickupAddress()}` : "empty";
+  return trips.map(trip => `${trip.id}:${routeStops(trip, options).map(googleStopKey).join("|")}`).join("::");
+}
+
+function fitRouteMap(canvasId) {
+  const googleView = state.googleMapsViews[canvasId];
+  if (googleView?.homeCenter) { googleView.map.setCenter(googleView.homeCenter); googleView.map.setZoom(13); return; }
+  if (googleView?.bounds) { googleView.map.fitBounds(googleView.bounds, 40); return; }
+  const openView = state.openMapViews[canvasId];
+  if (openView?.bounds) openView.map.fitBounds(openView.bounds, {padding:40,maxZoom:15,duration:0});
+}
+
+function cleanGoogleMapStyle() {
+  return [
+    {featureType:"poi",elementType:"labels",stylers:[{visibility:"off"}]},
+    {featureType:"transit",stylers:[{visibility:"off"}]},
+    {elementType:"geometry",stylers:[{color:"#f1f3f5"}]},
+    {elementType:"labels.text.fill",stylers:[{color:"#566375"}]},
+    {elementType:"labels.text.stroke",stylers:[{color:"#ffffff"}]},
+    {featureType:"road",elementType:"geometry",stylers:[{color:"#ffffff"}]},
+    {featureType:"road",elementType:"geometry.stroke",stylers:[{color:"#e0e5eb"}]},
+    {featureType:"road.highway",elementType:"geometry",stylers:[{color:"#f6e9b3"}]},
+    {featureType:"water",elementType:"geometry",stylers:[{color:"#c8dfee"}]},
+    {featureType:"poi.park",elementType:"geometry",stylers:[{color:"#e2ebdf"}]}
+  ];
+}
+
 function firstMapCenter(trips, options = {}) {
   for (const trip of trips) {
-    const liveStop = liveDriverStop(trip);
+    const liveStop = !options.planned && liveDriverStop(trip);
     if (liveStop) return liveStop.address;
     const stop = googleRouteStops(trip, options).find((item) => typeof item.address === "object");
     if (stop) return stop.address;
   }
-  return { lat: 43.651, lng: -79.383 };
+  return state.googleMapHome?.position || { lat: 45.4215, lng: -75.6972 };
+}
+
+async function googleMapHomePosition(address) {
+  if (!address) return null;
+  if (state.googleMapHome?.address === address) return state.googleMapHome.position;
+  try {
+    // Resolve the depot using the already configured Routes API; no driver GPS
+    // or additional Google service is needed to display the idle street map.
+    const {Route} = await google.maps.importLibrary("routes");
+    const result = await Route.computeRoutes({origin:address,destination:address,travelMode:"DRIVING",fields:["legs"]});
+    const position = googleCoordinate(result.routes?.[0]?.legs?.[0]?.startLocation);
+    if (position) state.googleMapHome = {address,position};
+    return position;
+  } catch { return null; }
 }
 
 function loadGoogleMaps() {
+  if (state.googleMapsDenied) return Promise.reject(new Error("Google Maps authorization failed."));
+  // Authorization can fail after the script callback has already resolved.
+  // Google calls this hook instead of rejecting importLibrary's promise.
+  window.gm_authFailure = handleGoogleMapsAuthFailure;
   const apiKey = state.mapsConfig?.apiKey;
   if (!apiKey) return Promise.reject(new Error("Google Maps key is not configured."));
   if (window.google?.maps?.importLibrary) return Promise.resolve(window.google.maps);
@@ -3233,8 +3516,7 @@ function loadGoogleMaps() {
       key: apiKey,
       v: "weekly",
       loading: "async",
-      callback: callbackName,
-      auth_referrer_policy: "origin"
+      callback: callbackName
     });
     if (state.mapsConfig?.mapId) params.set("map_ids", state.mapsConfig.mapId);
 
@@ -3256,6 +3538,18 @@ function loadGoogleMaps() {
   });
 
   return state.googleMapsPromise;
+}
+
+function handleGoogleMapsAuthFailure() {
+  state.googleMapsDenied = true;
+  state.googleMapsDrawSeq += 1;
+  for (const view of Object.values(state.googleMapsViews)) {
+    view.seq = -1;
+    clearGoogleMapView(view);
+  }
+  for (const [id, request] of Object.entries(state.mapRequests)) {
+    if (document.getElementById(id)) drawMap(id, request.trips, request.options);
+  }
 }
 
 function loadOpenMap() {
@@ -3307,10 +3601,11 @@ function openMapData(trips) {
         geometry: { type: "LineString", coordinates }
       });
     }
-    drivers.push({
+    const liveStop = liveDriverStop(trip);
+    if (liveStop) drivers.push({
       type: "Feature",
       properties: { color, label: initials(trip.driver?.name || trip.customerName) },
-      geometry: { type: "Point", coordinates: coordinates.at(-1) }
+      geometry: { type: "Point", coordinates: [liveStop.address.lng, liveStop.address.lat] }
     });
   }
 
@@ -3341,9 +3636,13 @@ async function renderOpenMap(canvasId, trips) {
 
   const data = openMapData(trips);
   const maplibregl = await loadOpenMap();
+  const viewportKey = mapViewportKey(trips, {planned:canvasId === "dispatcher-map"});
+  if (document.getElementById(`${canvasId}-google`) !== mapEl) return true;
 
   let view = state.openMapViews[canvasId];
   if (view?.mapEl !== mapEl) {
+    const camera = view?.viewportKey === viewportKey ? {center:view.map.getCenter(),zoom:view.map.getZoom()} : null;
+    const previousKey = view?.viewportKey;
     clearOpenMapView(canvasId);
     const googleView = state.googleMapsViews[canvasId];
     if (googleView) {
@@ -3352,17 +3651,19 @@ async function renderOpenMap(canvasId, trips) {
     }
     mapEl.replaceChildren();
 
-    const center = data.bounds[0] || [-96.5, 56.1];
+    const defaultCenter = firstMapCenter(trips, {planned:canvasId === "dispatcher-map"});
+    const center = camera?.center || data.bounds[0] || [defaultCenter.lng, defaultCenter.lat];
     const map = new maplibregl.Map({
       container: mapEl,
       style: OPEN_MAP_STYLE_URL,
       center,
-      zoom: data.bounds.length ? 13 : 3,
+      zoom: camera?.zoom || 12,
+      cooperativeGestures: true,
       attributionControl: false
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }));
-    view = { map, mapEl };
+    view = { map, mapEl, viewportKey:previousKey };
     state.openMapViews[canvasId] = view;
 
     await new Promise((resolve, reject) => {
@@ -3377,8 +3678,10 @@ async function renderOpenMap(canvasId, trips) {
         reject(event?.error || new Error("The open map style failed to load."));
       });
     });
+    if (document.getElementById(`${canvasId}-google`) !== mapEl || state.openMapViews[canvasId] !== view) return true;
 
     map.addSource("rova-live-routes", { type: "geojson", data: data.routes });
+    map.addLayer({id:"rova-live-route-casing",type:"line",source:"rova-live-routes",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#ffffff","line-width":8}});
     map.addLayer({
       id: "rova-live-routes",
       type: "line",
@@ -3405,17 +3708,18 @@ async function renderOpenMap(canvasId, trips) {
 
   if (data.bounds.length) {
     const bounds = data.bounds.reduce((result, coordinate) => result.extend(coordinate), new maplibregl.LngLatBounds(data.bounds[0], data.bounds[0]));
-    if (data.bounds.length === 1) view.map.jumpTo({ center: data.bounds[0], zoom: 14 });
-    else view.map.fitBounds(bounds, { padding: 56, maxZoom: 15, duration: 0 });
+    view.bounds = bounds;
+    if (view.viewportKey !== viewportKey) view.map.fitBounds(bounds, { padding: 40, maxZoom: 15, duration: 0 });
   } else {
-    view.map.jumpTo({ center: [-96.5, 56.1], zoom: 3 });
+    view.bounds = null;
   }
+  view.viewportKey = viewportKey;
   view.map.resize();
 
   if (etaEl) {
     etaEl.textContent = data.drivers.features.length
       ? `${data.drivers.features.length} live driver${data.drivers.features.length === 1 ? "" : "s"} on the map`
-      : "Waiting for the driver's first GPS update";
+      : "Street map ready. Select orders to preview their route; driver GPS is not required.";
     etaEl.hidden = false;
   }
   wrap.classList.add("google-active");
@@ -3423,11 +3727,12 @@ async function renderOpenMap(canvasId, trips) {
 }
 
 function googleRouteRequest(stops, options = {}) {
-  const intermediates = stops.slice(1, -1).slice(0, 25).map((stop) => ({
+  if (stops.length > 27) throw new Error("Google preview supports up to 25 intermediate stops. Split this route into smaller groups.");
+  const intermediates = stops.slice(1, -1).map((stop) => ({
     location: googleStopLocation(stop)
   }));
   const optimizeWaypointOrder = intermediates.length > 1 && options.optimizeWaypointOrder !== false;
-  const fields = ["path", "durationMillis", "distanceMeters", "localizedValues"];
+  const fields = ["path", "legs", "durationMillis", "distanceMeters", "localizedValues"];
   if (optimizeWaypointOrder) fields.push("optimizedIntermediateWaypointIndices");
   return {
     origin: googleStopLocation(stops[0]),
@@ -3457,9 +3762,29 @@ async function computeGoogleRoute(Route, trip, stops, options = {}) {
   if (current?.route && now - current.updatedAt < GOOGLE_ROUTE_CACHE_MS) return current.route;
   if (current?.pending) return current.pending;
 
-  const pending = Route.computeRoutes(googleRouteRequest(stops, { optimizeWaypointOrder: !trip.preserveStopOrder }))
-    .then(({ routes }) => {
-      const route = routes?.[0] || null;
+  const pending = (async () => {
+      try {
+        if (!Route?.computeRoutes) throw new Error("Routes library unavailable");
+        const {routes} = await Route.computeRoutes(googleRouteRequest(stops, { optimizeWaypointOrder: !trip.preserveStopOrder }));
+        if (!routes?.[0]?.path?.length) throw new Error("No driving route returned");
+        return routes[0];
+      } catch {
+        const {DirectionsService} = await google.maps.importLibrary("routes");
+        if (!DirectionsService) throw new Error("Google routing is unavailable");
+        const response = await new DirectionsService().route({
+          origin: googleStopLocation(stops[0]), destination: googleStopLocation(stops.at(-1)),
+          waypoints: stops.slice(1,-1).map(stop => ({location:googleStopLocation(stop),stopover:true})),
+          travelMode:"DRIVING", optimizeWaypoints: !trip.preserveStopOrder,
+          drivingOptions:{departureTime:new Date(Date.now()+60000)}
+        });
+        const route = response.routes?.[0];
+        if (!route?.overview_path?.length) throw new Error("No driving route returned");
+        return {path:route.overview_path, optimizedIntermediateWaypointIndices:route.waypoint_order,
+          legs:route.legs.map(leg=>({startLocation:leg.start_location,endLocation:leg.end_location,durationMillis:Number(leg.duration_in_traffic?.value || leg.duration?.value || 0)*1000,distanceMeters:Number(leg.distance?.value || 0)})),
+          durationMillis:route.legs.reduce((sum,leg)=>sum+Number(leg.duration_in_traffic?.value || leg.duration?.value || 0),0)*1000,
+          distanceMeters:route.legs.reduce((sum,leg)=>sum+Number(leg.distance?.value || 0),0)};
+      }
+    })().then((route) => {
       state.googleRouteCache.set(key, { route, updatedAt: Date.now() });
       return route;
     })
@@ -3470,6 +3795,26 @@ async function computeGoogleRoute(Route, trip, stops, options = {}) {
 
   state.googleRouteCache.set(key, { pending, updatedAt: current?.updatedAt || 0 });
   return pending;
+}
+
+async function googlePlannedStopPositions(stops) {
+  state.googleStopPositionCache ||= new Map();
+  let Geocoder;
+  try { ({Geocoder} = await google.maps.importLibrary("geocoding")); } catch { return stops.map(stop=>googleCoordinate(googleStopLocation(stop))); }
+  const geocoder = Geocoder ? new Geocoder() : null;
+  return Promise.all(stops.map(async stop => {
+    const location = googleStopLocation(stop);
+    const coordinate = googleCoordinate(location);
+    if (coordinate) return coordinate;
+    if (!geocoder || !location) return null;
+    const key = String(location).trim();
+    const cached = state.googleStopPositionCache.get(key);
+    if (cached && Date.now()-cached.at < 600000) return cached.pending;
+    const pending = geocoder.geocode({address:key}).then(result=>googleCoordinate(result.results?.[0]?.geometry?.location)).catch(()=>null);
+    if (state.googleStopPositionCache.size >= 300) state.googleStopPositionCache.delete(state.googleStopPositionCache.keys().next().value);
+    state.googleStopPositionCache.set(key,{at:Date.now(),pending});
+    return pending;
+  }));
 }
 
 function googleMarkerStops(stops, route) {
@@ -3490,16 +3835,38 @@ function googleMarkerLabel(index, total, returnsToOrigin) {
   return String(index);
 }
 
+function googleCoordinate(location) {
+  if (!location || typeof location !== "object") return null;
+  if (location.latLng) return googleCoordinate(location.latLng);
+  const lat = typeof location.lat === "function" ? location.lat() : location.lat;
+  const lng = typeof location.lng === "function" ? location.lng() : location.lng;
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
+function googleWaypointPosition(route, stop, index) {
+  // Route requests accept addresses; map markers require actual coordinates.
+  const legPoint = index === 0 ? route.legs?.[0]?.startLocation : route.legs?.[index - 1]?.endLocation;
+  return googleCoordinate(legPoint) || googleCoordinate(googleStopLocation(stop));
+}
+
 function addGoogleMarker(view, map, markerLibrary, trip, stop, label, options = {}) {
-  const position = googleStopLocation(stop);
+  const position = googleCoordinate(options.position) || googleCoordinate(googleStopLocation(stop));
   if (!position) return;
 
-  if (options.live && state.mapsConfig?.mapId && markerLibrary.AdvancedMarkerElement) {
+  const color = options.depot ? "#243044" : trip.driver?.color || "#245bd6";
+  if (state.mapsConfig?.mapId && markerLibrary.AdvancedMarkerElement) {
+    const content = options.live ? driverMarkerContent(trip) : document.createElement("div");
+    if (!options.live) {
+      content.className = "route-stop-pin";
+      content.style.setProperty("--pin-color", color);
+      content.textContent = label;
+    }
     const marker = new markerLibrary.AdvancedMarkerElement({
       map,
       position,
-      title: trip.driver?.name || "Driver",
-      content: driverMarkerContent(trip)
+      title: options.live ? `${trip.driver?.name || "Driver"} · ${trackingStatus(trip)}` : `${stop.label}: ${typeof stop.address === "string" ? stop.address : ""}`,
+      content,
+      zIndex: options.live ? 1000 : options.depot ? 100 : 200
     });
     view.markers.push(marker);
     return;
@@ -3509,8 +3876,10 @@ function addGoogleMarker(view, map, markerLibrary, trip, stop, label, options = 
     const marker = new google.maps.Marker({
       map,
       position,
-      title: options.live ? (trip.driver?.name || "Driver") : stop.label,
-      label
+      title: options.live ? `${trip.driver?.name || "Driver"} · ${trackingStatus(trip)}` : `${stop.label}: ${typeof stop.address === "string" ? stop.address : ""}`,
+      icon: {path:google.maps.SymbolPath?.CIRCLE ?? 0,fillColor:color,fillOpacity:1,strokeColor:"#ffffff",strokeWeight:3,scale:options.live ? 17 : 14},
+      label: {text:label,color:"#ffffff",fontSize:"13px",fontWeight:"600"},
+      zIndex: options.live ? 1000 : options.depot ? 100 : 200
     });
     view.markers.push(marker);
   }
@@ -3526,12 +3895,13 @@ async function renderGoogleRoutes(canvasId, trips, options = {}) {
   const routableTrips = trips
     .map((trip) => ({ trip, stops: googleRouteStops(trip, options) }))
     .filter(({ stops }) => stops.length >= 2);
-  if (!routableTrips.length) return false;
-
+  const viewportKey = mapViewportKey(trips, options);
   let view = state.googleMapsViews[canvasId];
   if (view?.mapEl !== mapEl) {
+    const camera = view?.viewportKey === viewportKey && view.map ? {center:view.map.getCenter(),zoom:view.map.getZoom()} : null;
+    const previousKey = view?.viewportKey;
     if (view) clearGoogleMapView(view);
-    view = { map: null, mapEl, polylines: [], markers: [], signature: "", seq: 0 };
+    view = { map: null, mapEl, polylines: [], markers: [], signature: "", seq: 0, camera, viewportKey:previousKey };
     state.googleMapsViews[canvasId] = view;
   }
 
@@ -3539,62 +3909,97 @@ async function renderGoogleRoutes(canvasId, trips, options = {}) {
   view.seq = seq;
 
   await loadGoogleMaps();
-  const [{ Map, Polyline }, { LatLngBounds }, { Route }, markerLibrary] = await Promise.all([
+  const [{ Map, Polyline }, { LatLngBounds }, markerLibrary] = await Promise.all([
     google.maps.importLibrary("maps"),
     google.maps.importLibrary("core"),
-    google.maps.importLibrary("routes"),
     google.maps.importLibrary("marker").catch(() => ({}))
   ]);
-  if (view.seq !== seq) return true;
+  if (state.googleMapsDenied) return false;
+  if (view.seq !== seq || document.getElementById(`${canvasId}-google`) !== mapEl) return true;
 
   if (!view.map) {
+    if (state.openMapViews[canvasId]) { clearOpenMapView(canvasId); mapEl.replaceChildren(); }
     const mapOptions = {
-      center: firstMapCenter(trips, options),
-      zoom: 12,
+      center: view.camera?.center || firstMapCenter(trips, options),
+      zoom: view.camera?.zoom || 12,
+      gestureHandling: "cooperative",
+      zoomControl: true,
+      controlSize: 32,
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: false,
       clickableIcons: false
     };
     if (state.mapsConfig?.mapId) mapOptions.mapId = state.mapsConfig.mapId;
+    else mapOptions.styles = cleanGoogleMapStyle();
     view.map = new Map(mapEl, mapOptions);
   }
 
   clearGoogleMapView(view);
+  wrap.classList.add("google-active");
+  // A routing failure must never remove a working street map or require GPS.
+  const {Route} = routableTrips.length ? await google.maps.importLibrary("routes").catch(()=>({})) : {};
+  if (view.seq !== seq || document.getElementById(`${canvasId}-google`) !== mapEl) return true;
+  const needsFit = view.viewportKey !== viewportKey;
+  if (!routableTrips.length) {
+    const address = canvasId === "dispatcher-map" ? companyPickupAddress() : "";
+    const position = await googleMapHomePosition(address);
+    if (view.seq !== seq || document.getElementById(`${canvasId}-google`) !== mapEl) return true;
+    view.homeCenter = position;
+    if (position) {
+      addGoogleMarker(view,view.map,markerLibrary,{}, {label:"Depot",address},"D",{position,depot:true});
+      if (needsFit || !view.viewportKey) { view.map.setCenter(position); view.map.setZoom(13); }
+    }
+    view.viewportKey = viewportKey;
+    view.bounds = null;
+    if (etaEl) { etaEl.textContent = `${position ? "Depot map ready." : "Street map ready."} No active routes. Select orders to preview a route—driver GPS is not required.`; etaEl.hidden = false; }
+    wrap.classList.add("google-active");
+    return true;
+  }
   const bounds = new LatLngBounds();
+  view.homeCenter = null;
   let hasBounds = false;
   let rendered = 0;
+  let unresolved = 0;
   const summaries = [];
 
   for (const { trip, stops } of routableTrips) {
     try {
       const route = await computeGoogleRoute(Route, trip, stops, options);
+      if (view.seq !== seq || document.getElementById(`${canvasId}-google`) !== mapEl) return true;
       if (!route?.path?.length) continue;
+      const depotPosition = googleCoordinate(route.legs?.[0]?.startLocation);
+      if (options.planned && depotPosition && googleStopLocation(stops[0]) === companyPickupAddress()) state.googleMapHome = {address:companyPickupAddress(),position:depotPosition};
 
-      const color = trip.driver?.color || "#2563eb";
+      const color = trip.driver?.color || "#245bd6";
+      const casing = new Polyline({map:view.map,path:route.path,strokeColor:"#ffffff",strokeOpacity:1,strokeWeight:8,zIndex:1});
+      view.polylines.push(casing);
       const polyline = new Polyline({
         map: view.map,
         path: route.path,
         strokeColor: color,
-        strokeOpacity: 0.86,
-        strokeWeight: 5
+        strokeOpacity: 1,
+        strokeWeight: 5,
+        zIndex: 2
       });
       view.polylines.push(polyline);
 
-      const liveStop = liveDriverStop(trip);
+      const liveStop = trip.status === "active" ? liveDriverStop(trip) : null;
       const orderedStops = googleMarkerStops(stops, route);
-      const markerStops = liveStop ? orderedStops.slice(1) : orderedStops;
-      const firstLocation = googleStopLocation(orderedStops[0]);
-      const lastLocation = googleStopLocation(orderedStops.at(-1));
+      const usesLiveOrigin = Boolean(liveStop && !options.planned);
+      const markerStops = usesLiveOrigin ? orderedStops.slice(1) : orderedStops;
+      const plannedStops = routeStops(trip, options);
+      const firstLocation = googleStopLocation(plannedStops[0]);
+      const lastLocation = googleStopLocation(plannedStops.at(-1));
       const returnsToOrigin = typeof firstLocation === "object" || typeof lastLocation === "object"
         ? JSON.stringify(firstLocation) === JSON.stringify(lastLocation)
         : String(firstLocation).trim().toLowerCase() === String(lastLocation).trim().toLowerCase();
       markerStops.forEach((stop, index) => {
-        const markerIndex = liveStop ? index + 1 : index;
-        const label = liveStop && markerIndex < orderedStops.length - 1
-          ? String(markerIndex)
-          : googleMarkerLabel(markerIndex, orderedStops.length, returnsToOrigin);
-        addGoogleMarker(view, view.map, markerLibrary, trip, stop, label);
+        const markerIndex = usesLiveOrigin ? index + 1 : index;
+        // The return depot is the same place as the start, not another stop pin.
+        if (!usesLiveOrigin && returnsToOrigin && markerIndex === orderedStops.length - 1) return;
+        const label = markerIndex === 0 || (returnsToOrigin && markerIndex === orderedStops.length - 1) ? "D" : String(markerIndex);
+        addGoogleMarker(view, view.map, markerLibrary, trip, stop, label, { position: googleWaypointPosition(route, stop, markerIndex), depot:markerIndex === 0 || (returnsToOrigin && markerIndex === orderedStops.length - 1) });
       });
 
       if (liveStop) addGoogleMarker(view, view.map, markerLibrary, trip, liveStop, initials(trip.driver?.name), { live: true });
@@ -3607,36 +4012,51 @@ async function renderGoogleRoutes(canvasId, trips, options = {}) {
       const summary = routeSummaryFromGoogle(route);
       const intermediateCount = Math.max(0, stops.length - 2);
       const optimized = route.optimizedIntermediateWaypointIndices?.length ? " optimized" : "";
-      summaries.push([
+      summaries.push(options.planned ? [trip.customerName,...plannedGoogleEstimateLines(route,stops)].filter(Boolean).join("\n") : [
         trip.customerName,
         summary.duration,
-        summary.eta ? `ETA ${summary.eta}` : "",
+        summary.eta ? `${options.customer ? "ETA" : "Finish"} ${summary.eta}` : "",
         summary.distance,
         intermediateCount ? `${intermediateCount} stop${intermediateCount === 1 ? "" : "s"}${optimized}` : ""
       ].filter(Boolean).join(" · "));
       rendered += 1;
     } catch (error) {
-      if (isGoogleMapsAccessError(error)) {
-        state.googleMapsDenied = true;
-        console.warn("Google route access is unavailable. Using the live GPS map fallback.");
-        break;
-      }
-      console.warn("Google route failed", error);
+      unresolved += 1;
+      // Geocoded stops still provide a useful dispatch map if driving directions fail.
+      const points = await googlePlannedStopPositions(stops);
+      if (view.seq !== seq || document.getElementById(`${canvasId}-google`) !== mapEl) return true;
+      const returns = googleStopLocation(stops[0]) === googleStopLocation(stops.at(-1));
+      points.forEach((position,index)=>{
+        if (!position || (returns && index === stops.length-1)) return;
+        addGoogleMarker(view,view.map,markerLibrary,trip,stops[index],index === 0 ? "D" : String(index),{position,depot:index === 0});
+        bounds.extend(position); hasBounds=true;
+      });
+      const liveStop = trip.status === "active" ? liveDriverStop(trip) : null;
+      if (liveStop) { addGoogleMarker(view,view.map,markerLibrary,trip,liveStop,initials(trip.driver?.name),{live:true}); bounds.extend(liveStop.address); hasBounds=true; }
+      console.warn("Google driving route unavailable; keeping the planned map.");
     }
   }
 
-  if (!rendered) return false;
+  // A base map without any resolved stops is not a usable route preview.
+  // Fall back to the open street map when both routing and geocoding fail.
+  if (unresolved && !rendered && !hasBounds) return false;
+
   view.signature = routableTrips.map(({ trip }) => googleRouteCacheKey(trip, options)).join("::");
-  if (hasBounds) view.map.fitBounds(bounds, 56);
+  view.bounds = hasBounds ? bounds : null;
+  if (hasBounds && needsFit) view.map.fitBounds(bounds, 40);
+  view.viewportKey = viewportKey;
   if (etaEl) {
-    etaEl.textContent = summaries.join(" | ");
-    etaEl.hidden = !summaries.length;
+    etaEl.textContent = [...summaries, unresolved ? (hasBounds ? "Showing stop locations. Google driving directions are unavailable; GPS is not required for planning." : "Street map ready. Google could not resolve this route. Check the addresses and Maps access; GPS is not required.") : options.planned ? "Google estimates if leaving now—not recorded trip time. Live arrival estimates need fresh driver GPS." : ""].filter(Boolean).join("\n");
+    etaEl.hidden = !etaEl.textContent;
   }
   wrap.classList.add("google-active");
   return true;
 }
 
 function drawMap(canvasId, trips, options = {}) {
+  if (canvasId === "dispatcher-map") options = {...options,planned:true};
+  state.mapRequests[canvasId] = {trips, options};
+  const targetMapEl = document.getElementById(`${canvasId}-google`);
   if (canvasId === "dispatcher-map") {
     const badge = document.querySelector('[data-map-badge-for="dispatcher-map"]');
     const selectedCount = state.selectedOrderIds.size;
@@ -3645,13 +4065,22 @@ function drawMap(canvasId, trips, options = {}) {
       badge.textContent = selectedCount
         ? `Selected route · ${selectedCount} order${selectedCount === 1 ? "" : "s"}`
         : liveCount
-          ? `Live fleet · ${liveCount} deliver${liveCount === 1 ? "y" : "ies"}`
-          : "Recent routes";
+          ? `Planned routes · ${liveCount} deliver${liveCount === 1 ? "y" : "ies"}`
+          : queuedTrips().length ? "Waiting orders · Planned route" : "Route map";
     }
   }
   const useLiveMap = () => renderOpenMap(canvasId, trips).then((rendered) => {
+    if (document.getElementById(`${canvasId}-google`) !== targetMapEl) return;
     if (!rendered) deactivateGoogleMap(canvasId);
-  }).catch(() => deactivateGoogleMap(canvasId));
+    const eta = document.getElementById(`${canvasId}-eta`);
+    if (eta && trips.some(t => routeStops(t, options).length >= 2)) {
+      const hasGps = trips.some(t => t.path?.length || t.location);
+      eta.textContent = options.planned
+        ? "Street map ready. Google route preview is unavailable—check Maps access and stop addresses. Use the Google Maps link for directions. Driver GPS is not required."
+        : `Google route preview unavailable. ${hasGps ? "Showing recorded GPS only." : "No GPS has been recorded."} Use the Google Maps link to open directions. Routes above 25 intermediate stops must be split.`;
+      eta.hidden = false;
+    }
+  }).catch(() => { if (document.getElementById(`${canvasId}-google`) === targetMapEl) deactivateGoogleMap(canvasId, "Street map unavailable. Check your connection; any visible line is recorded GPS, not a driving route."); });
 
   drawCanvasMap(canvasId, trips);
   if (state.mapsConfig?.configured && !state.googleMapsDenied) {
@@ -3678,7 +4107,9 @@ function drawCanvasMap(canvasId, trips) {
   ctx.clearRect(0, 0, rect.width, rect.height);
 
   const points = trips.flatMap((trip) => trip.path?.length ? trip.path : trip.location ? [trip.location] : []);
-  drawRoads(ctx, rect.width, rect.height);
+  // Never draw invented streets. This is only a neutral GPS plot while a real map loads.
+  ctx.fillStyle = "#f1f3f5";
+  ctx.fillRect(0, 0, rect.width, rect.height);
 
   if (!points.length) {
     const courierTrip = trips.find((trip) => trip.courier);
@@ -3686,10 +4117,10 @@ function drawCanvasMap(canvasId, trips) {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#344054";
     ctx.font = "700 15px system-ui, sans-serif";
-    ctx.fillText(courierTrip ? "Courier route preview" : "Waiting for driver GPS", rect.width / 2, rect.height / 2 - 10);
+    ctx.fillText(courierTrip ? "Courier route preview" : "Map preview", rect.width / 2, rect.height / 2 - 10);
     ctx.fillStyle = "#667085";
     ctx.font = "13px system-ui, sans-serif";
-    ctx.fillText(courierTrip ? "Use the provider tracking link when it becomes available." : "The live route appears after the driver shares a first location.", rect.width / 2, rect.height / 2 + 16);
+    ctx.fillText(courierTrip ? "Open the courier tracking link for updates." : "Street maps load with an internet connection.", rect.width / 2, rect.height / 2 + 16);
     return;
   }
 
@@ -3753,50 +4184,65 @@ function drawCanvasMap(canvasId, trips) {
   }
 }
 
-function drawRoads(ctx, width, height) {
-  ctx.save();
-  ctx.strokeStyle = "rgba(15, 23, 42, 0.08)";
-  ctx.lineWidth = 7;
-  for (let x = -width; x < width * 2; x += 110) {
-    ctx.beginPath();
-    ctx.moveTo(x, height);
-    ctx.lineTo(x + width * 0.8, 0);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = "rgba(15, 23, 42, 0.06)";
-  ctx.lineWidth = 5;
-  for (let y = 40; y < height; y += 96) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y + 24);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
 function publishLocation(tripId, point) {
   const publish = state.locationPublishPromise
     .catch(() => {})
     .then(async () => {
+      if (state.publishTripId !== tripId) return null;
       const response = await api(`/api/trips/${tripId}/location`, {
         method: "POST",
         body: point
       });
       if (state.publishTripId !== tripId) return response;
+      state.gpsMessage = "Location received by dispatch. Keep Rivo open while delivering.";
       if (response.snapshot) state.snapshot = response.snapshot;
       if (state.route.name === "customer" && response.trip) state.customerTrip = response.trip;
+      if (response.trip?.status === "completed" && response.trip.completionSource === "gps-detected") {
+        const next = getTrips().filter(t => t.driverId === response.trip.driverId && t.status === "active").sort((a,b) => Number(a.routeSequence || 0) - Number(b.routeSequence || 0))[0];
+        stopPublishing(false);
+        toast("Stop auto-completed · continuing to the next delivery");
+        render();
+        if (next) setTimeout(() => startGps(next.id), 0);
+        return response;
+      }
       maybeRender();
       return response;
     })
     .catch((error) => {
-      if (state.publishTripId === tripId) toast(error.message);
+      if (state.publishTripId === tripId) {
+        state.gpsMessage = "Location not reaching dispatch. Check your connection; the next GPS update will retry.";
+        toast(error.message);
+        maybeRender();
+      }
       return null;
     });
   state.locationPublishPromise = publish;
   return publish;
 }
 
+function rememberGps(tripId) {
+  try {
+    if (tripId && state.auth?.role === "driver") sessionStorage.setItem("rivo-gps-consent", JSON.stringify({ tripId, driverId: state.auth.driverId, expires: Date.now() + 12 * 60 * 60 * 1000 }));
+    else sessionStorage.removeItem("rivo-gps-consent");
+  } catch {}
+}
+
+async function resumeGps() {
+  if (document.hidden || state.auth?.role !== "driver" || state.gpsWatchId !== null || state.simTimer !== null || state.gpsResuming) return;
+  state.gpsResuming = true;
+  try {
+    const consent = JSON.parse(sessionStorage.getItem("rivo-gps-consent") || "null");
+    if (!consent || consent.driverId !== state.auth.driverId || consent.expires < Date.now()) return;
+    const trip = getTrips().find((item) => item.id === consent.tripId && item.status === "active");
+    if (!trip) { rememberGps(""); return; }
+    const permission = await navigator.permissions?.query({ name: "geolocation" });
+    if (permission?.state === "granted" && !document.hidden && state.auth?.driverId === consent.driverId && state.gpsWatchId === null) startGps(trip.id);
+  } catch {} finally { state.gpsResuming = false; }
+}
+
 function stopPublishing(showToast = true) {
+  rememberGps("");
+  state.gpsMessage = "";
   if (state.gpsWatchId !== null && navigator.geolocation) {
     navigator.geolocation.clearWatch(state.gpsWatchId);
   }
@@ -3819,19 +4265,29 @@ function startGps(tripId) {
   }
   stopPublishing(false);
   state.publishTripId = tripId;
+  rememberGps(tripId);
+  state.gpsMessage = "Waiting for a GPS fix. Allow location access when asked.";
   state.gpsWatchId = navigator.geolocation.watchPosition(
     (position) => {
+      if (state.publishTripId !== tripId) return;
       publishLocation(tripId, {
         lat: position.coords.latitude,
         lng: position.coords.longitude,
         accuracy: position.coords.accuracy,
         heading: position.coords.heading,
-        speed: position.coords.speed
+        speed: position.coords.speed,
+        timestamp: new Date(position.timestamp).toISOString(), source: "gps"
       });
     },
     (error) => {
-      toast(error.message || "GPS permission was not granted.");
-      stopPublishing(false);
+      if (state.publishTripId !== tripId) return;
+      if (error.code === 1) {
+        stopPublishing(false);
+        toast("Location permission blocked. Allow location for Rivo in your browser settings, then start sharing again.");
+      } else {
+        state.gpsMessage = "GPS signal unavailable — still retrying. Keep Rivo open and check phone location settings.";
+        maybeRender();
+      }
     },
     {
       enableHighAccuracy: true,
@@ -3839,7 +4295,7 @@ function startGps(tripId) {
       timeout: 15000
     }
   );
-  toast("Publishing GPS");
+  toast("Starting location sharing");
   maybeRender();
 }
 
@@ -3858,7 +4314,7 @@ function startSimulation(tripId) {
       lng: Number(state.simOrigin.lng) + state.simStep * 0.00095 + Math.cos(angle) * 0.00024,
       accuracy: 12,
       heading: (state.simStep * 27) % 360,
-      speed: 8
+      speed: 8, source: "simulation"
     };
     publishLocation(tripId, point);
   };
@@ -3946,6 +4402,10 @@ async function completeTrip(tripId) {
   if (notes !== undefined) body.notes = notes;
   if (state.auth?.role === "dispatcher") {
     body.overrideReason = "Completed from the dispatcher active-delivery controls.";
+    if (Date.now() - Date.parse(originalTrip?.startedAt) > 24 * 3600_000) {
+      body.completedEarlier = true;
+      body.overrideReason = "Dispatcher confirmed this past delivery was already completed; exact delivery time was not recorded.";
+    }
     const editorFields = {
       customerName: activeEditorValue("data-order-customer"),
       pickup: activeEditorValue("data-order-pickup"),
@@ -3984,7 +4444,9 @@ async function completeTrip(tripId) {
 }
 
 async function completeActiveDelivery(tripId, tripName) {
-  if (!window.confirm(`Mark ${tripName || "this delivery"} complete? Live tracking will stop and the trip will move to mileage review.`)) return;
+  const trip = getTrips().find(t => t.id === tripId);
+  const past = Date.now() - Date.parse(trip?.startedAt) > 24 * 3600_000;
+  if (!window.confirm(`Mark ${tripName || "this delivery"} complete? ${past ? "This corrects an old delivery; its exact completion time will remain unknown." : "Live tracking will stop and the trip will move to mileage review."}`)) return;
   await completeTrip(tripId);
 }
 
@@ -4036,7 +4498,7 @@ async function syncChannels(connectionId = "") {
   const imported = results.reduce((total, item) => total + Number(item.imported || 0), 0);
   const updated = results.reduce((total, item) => total + Number(item.updated || 0), 0);
   const errors = results.filter((item) => item.error).length;
-  toast(errors ? `Sync finished with ${errors} connection error${errors === 1 ? "" : "s"}` : `Sync complete · ${imported} new · ${updated} updated`);
+  toast(errors ? `Sync finished with ${errors} connection error${errors === 1 ? "" : "s"}` : `Synced ${results.reduce((total,item)=>total+Number(item.ordersFetched || 0),0)} orders · ${imported} new · ${updated} updated`);
   render();
 }
 
@@ -4118,8 +4580,9 @@ async function closeExceptionTrip(tripId) {
 }
 
 async function dispatchSelectedRoute() {
-  const tripIds = getTrips().filter((trip) => state.selectedOrderIds.has(trip.id)).map((trip) => trip.id);
+  const tripIds = selectedRouteOrders().map(trip => trip.id);
   if (!tripIds.length) throw new Error("Select at least one order.");
+  if (tripIds.length > 25) throw new Error("Split this route into groups of up to 25 stops so every stop can be previewed.");
   const driverId = document.getElementById("bulk-order-driver")?.value || "";
   const kmRate = Number(document.getElementById("bulk-order-rate")?.value || 0);
   const response = await api("/api/routes/dispatch", {
@@ -4128,12 +4591,16 @@ async function dispatchSelectedRoute() {
       tripIds,
       driverId,
       kmRate,
+      preserveStopOrder: true,
       origin: companyPickupAddress()
     }
   });
   if (response.snapshot) state.snapshot = response.snapshot;
   state.selectedOrderIds.clear();
-  toast(response.optimized ? `${response.trips.length} orders dispatched as an optimized route` : `${response.trips.length} orders dispatched as one route`);
+  state.routeDraftIds = [];
+  state.routeDraftPlan = null;
+  state.operationsPane = "active";
+  toast(`${response.trips.length} orders sent to ${getDriver(driverId)?.name || "driver"} in your previewed order`);
   render();
 }
 
@@ -4157,10 +4624,43 @@ async function assignSelectedOrders() {
   render();
 }
 
+function requestText(message, initialValue = "") {
+  return new Promise((resolve) => {
+    const previousFocus = document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.className = "action-dialog";
+    dialog.setAttribute("aria-labelledby", "action-dialog-title");
+    dialog.innerHTML = `<form method="dialog"><h2 id="action-dialog-title">Confirm delivery update</h2><p>${h(message)}</p><label for="action-dialog-reason">Reason</label><textarea id="action-dialog-reason" class="input" required rows="3"></textarea><div class="action-dialog-buttons"><button class="button secondary" type="button" data-cancel>Cancel</button><button class="button" type="submit">Confirm update</button></div></form>`;
+    const input = dialog.querySelector("textarea");
+    input.value = initialValue;
+    let result = null;
+    dialog.querySelector("form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!input.value.trim()) {
+        input.setCustomValidity("Enter a reason for this update.");
+        input.reportValidity();
+        return;
+      }
+      result = input.value.trim();
+      dialog.close();
+    });
+    input.addEventListener("input", () => input.setCustomValidity(""));
+    dialog.querySelector("[data-cancel]").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => {
+      dialog.remove();
+      if (previousFocus?.isConnected) previousFocus.focus();
+      resolve(result);
+    }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+    input.focus();
+  });
+}
+
 async function markSelectedOrdersDelivered() {
   const tripIds = getTrips().filter((trip) => state.selectedOrderIds.has(trip.id)).map((trip) => trip.id);
   if (!tripIds.length) throw new Error("Select at least one order.");
-  const overrideReason = window.prompt(
+  const overrideReason = await requestText(
     `Why are ${tripIds.length} selected order${tripIds.length === 1 ? "" : "s"} being marked delivered by dispatch?`,
     "Delivery confirmed by dispatch"
   );
@@ -4175,7 +4675,7 @@ async function markSelectedOrdersDelivered() {
 async function completeSelectedActiveTrips() {
   const tripIds = getTrips().filter((trip) => state.selectedActiveTripIds.has(trip.id)).map((trip) => trip.id);
   if (!tripIds.length) throw new Error("Select at least one active delivery.");
-  const overrideReason = window.prompt(
+  const overrideReason = await requestText(
     `Why is dispatch completing ${tripIds.length} selected deliver${tripIds.length === 1 ? "y" : "ies"}?`,
     "Delivery confirmed by dispatch"
   );
@@ -4260,7 +4760,7 @@ async function saveOrderChanges(tripId) {
 }
 
 async function markOrderDelivered(tripId, orderLabel) {
-  const overrideReason = window.prompt(
+  const overrideReason = await requestText(
     `Why is ${orderLabel || "this order"} being marked delivered by dispatch?`,
     "Delivery confirmed by dispatch"
   );
@@ -4332,7 +4832,7 @@ async function copyDriverInvite(driverId) {
 async function updateDriverProfile(form) {
   const body = formObject(form);
   const driverId = String(body.driverId || "");
-  body.defaultRate = Number(body.defaultRate || 0);
+  body.defaultRate = body.defaultRate === "" ? null : Number(body.defaultRate);
   body.capacity = Number(body.capacity || 20);
   delete body.driverId;
   const response = await api(`/api/drivers/${encodeURIComponent(driverId)}`, { method: "PATCH", body });
@@ -4428,12 +4928,14 @@ async function loginTeam(identifier, password) {
     });
     state.auth = response.session;
     state.snapshot = response.snapshot;
+    state.myMileage = null;
     state.ownerRecoveryMode = false;
     state.ownerRecoveryError = "";
     writeStoredAuth(state.auth);
     connectSnapshotStream();
     window.history.replaceState({}, "", dispatcherPath());
     render();
+    if (state.auth.mileageDriverId) void refreshMyMileage();
   } catch (error) {
     state.auth = null;
     state.snapshot = null;
@@ -4471,7 +4973,43 @@ async function setupOwnerAccount(body) {
   }
 }
 
+async function requestAccountDeletion() {
+  const previousFocus = document.activeElement;
+  const dialog = document.createElement("dialog");
+  dialog.className = "action-dialog";
+  dialog.setAttribute("aria-labelledby", "deletion-title");
+  dialog.innerHTML = `<form><h2 id="deletion-title">Request account deletion</h2><p>This sends a request to delete your Rivo account and associated personal data. It requires manual processing. Your account stays active until processing is complete; submitting this form does not erase data or stop tracking.</p><p>Submitted business reports and delivery records may require a retention review. You can pause Auto-track in Settings now.</p><p data-request-status role="status"></p><div data-deletion-fields><label for="delete-password">Current password</label><input id="delete-password" class="input" type="password" autocomplete="current-password" required maxlength="1024"><label for="delete-confirmation">Type DELETE to confirm</label><input id="delete-confirmation" class="input" required autocomplete="off" pattern="DELETE"></div><p class="mileage-error" role="alert"></p><div class="action-dialog-buttons"><button class="button secondary" type="button" data-cancel>Cancel</button><button class="button" type="submit">Send deletion request</button></div></form>`;
+  const submit = dialog.querySelector('[type="submit"]');
+  const showRequest = request => {
+    if (!request) return;
+    dialog.querySelector('[data-request-status]').textContent = `Request ${request.id} received ${new Date(request.requestedAt).toLocaleDateString()}. Status: pending processing. Your data has not yet been deleted.`;
+    submit.disabled = true;
+    submit.hidden = true;
+    dialog.querySelector("[data-deletion-fields]").hidden = true;
+    dialog.querySelectorAll("input").forEach(input => {input.value="";input.disabled=true;});
+    dialog.querySelector('[data-cancel]').textContent = "Close";
+  };
+  dialog.querySelector("form").addEventListener("submit", async event => {
+    event.preventDefault();submit.disabled=true;
+    try {
+      const response = await api("/api/account/deletion-request", {method:"POST",body:{password:dialog.querySelector('#delete-password').value,confirmation:dialog.querySelector('#delete-confirmation').value}});
+      showRequest(response.request);
+    } catch(error) {dialog.querySelector('[role="alert"]').textContent=error.message;submit.disabled=false;}
+    finally {dialog.querySelector('#delete-password').value="";}
+  });
+  dialog.querySelector('[data-cancel]').addEventListener("click",()=>dialog.close());
+  dialog.addEventListener("close",()=>{dialog.remove();if(previousFocus?.isConnected)previousFocus.focus();},{once:true});
+  document.body.append(dialog);dialog.showModal();dialog.querySelector('input').focus();
+  try {showRequest((await api("/api/account/deletion-request")).request);} catch(error) {dialog.querySelector('[role="alert"]').textContent=error.message;}
+}
+
 async function logoutTeam() {
+  // A trusted iPhone shell can only stop capture through this command. It cannot
+  // enable tracking or expose credentials. Do this before an offline logout stalls.
+  window.webkit?.messageHandlers?.rivoPrivacy?.postMessage("signOut");
+  mileageUI.stop();
+  personalMileageUI.stop();
+  await assignmentAlerts.disable().catch(()=>{});
   try {
     await api("/api/auth/logout", {
       method: "POST",
@@ -4482,7 +5020,10 @@ async function logoutTeam() {
   }
   stopPublishing(false);
   state.auth = null;
+  state.lastApiKey = null;
+  state.lastWebhook = null;
   state.snapshot = null;
+  state.myMileage = null;
   state.loginError = "";
   stopLiveRefresh();
   writeStoredAuth(null);
@@ -4552,6 +5093,7 @@ for (const eventName of ["pointerup", "pointercancel"]) {
 
 app.addEventListener("click", async (event) => {
   if (event.target.matches("[data-modal-backdrop]")) {
+    state.createDeliveryOpen=false;
     state.editingDriverId = "";
     state.editingCourierId = "";
     state.courierRequestTripIds = [];
@@ -4561,6 +5103,22 @@ app.addEventListener("click", async (event) => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
   const action = target.dataset.action;
+  if(action === "close-create-delivery") {state.createDeliveryOpen=false;render();return;}
+  if (action === "fit-route-map") { fitRouteMap(target.dataset.mapId); return; }
+  if (action === "expand-route-map") {
+    const component = target.closest(".route-map");
+    if (!component) return;
+    const expanded = component.classList.toggle("is-expanded");
+    target.setAttribute("aria-expanded", String(expanded));
+    target.textContent = expanded ? "Reduce" : "Expand";
+    const id = target.dataset.mapId;
+    requestAnimationFrame(() => {
+      state.openMapViews[id]?.map.resize();
+      if (state.googleMapsViews[id]?.map) google.maps.event?.trigger(state.googleMapsViews[id].map, "resize");
+      fitRouteMap(id);
+    });
+    return;
+  }
   const actionButton = target.closest("button");
   if (actionButton?.disabled) return;
   if (actionButton) actionButton.disabled = true;
@@ -4574,6 +5132,16 @@ app.addEventListener("click", async (event) => {
       target.setAttribute("aria-pressed", String(reveal));
       return;
     }
+    if (action === "operations-pane") {
+      if (!["orders", "active", "pickups", "history", "map", "custom"].includes(target.dataset.pane)) return;
+      state.operationsPane = target.dataset.pane;
+      state.orderFilter = "all";
+      state.orderQuery = "";
+      state.selectedOrderIds.clear();
+      state.dashboardCustomizing = false;
+      render();
+      return;
+    }
     if (action === "copy") {
       await copyText(target.dataset.copy || "");
       return;
@@ -4584,6 +5152,7 @@ app.addEventListener("click", async (event) => {
       state.dispatcherView = view;
       window.history.replaceState({}, "", dispatcherPath());
       render();
+      if (view === "my-mileage" && state.auth.mileageDriverId) void refreshMyMileage();
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
@@ -4736,11 +5305,17 @@ app.addEventListener("click", async (event) => {
       requestAnimationFrame(() => document.getElementById(state.ownerRecoveryMode ? "recovery-identifier" : "login-identifier")?.focus());
       return;
     }
+    if (action === "enable-assignment-alerts") { await assignmentAlerts.enable(); return; }
+    if (action === "test-assignment-alert") { await assignmentAlerts.test(); return; }
+    if (action === "disable-assignment-alerts") { await assignmentAlerts.disable(); toast("Phone alerts turned off"); return; }
+    if (action === "review-assignments") { await assignmentAlerts.review(); return; }
+    if (action === "request-account-deletion") { await requestAccountDeletion(); return; }
     if (action === "logout") {
       await logoutTeam();
       return;
     }
     if (action === "open-driver-form") {
+      state.dispatcherView="drivers"; window.history.replaceState({},"",dispatcherPath()); render();
       const formPanel = document.getElementById("add-driver");
       if (formPanel) {
         formPanel.open = true;
@@ -4757,11 +5332,13 @@ app.addEventListener("click", async (event) => {
       return;
     }
     if (action === "open-create-delivery") {
+      state.dispatcherView="operations"; state.createDeliveryOpen=true; render(); return;
+      state.operationsPane = "orders";
       if (state.dashboardLayout.hidden.includes("create")) {
         state.dashboardLayout.hidden = state.dashboardLayout.hidden.filter((id) => id !== "create");
         saveDashboardLayout();
-        render();
       }
+      render();
       requestAnimationFrame(() => {
         const formPanel = document.getElementById("create-delivery");
         if (!formPanel) return;
@@ -4777,6 +5354,23 @@ app.addEventListener("click", async (event) => {
     }
     if (action === "sync-channels") {
       await syncChannels();
+      return;
+    }
+    if (action === "hide-api-key") { state.lastApiKey = null; render(); return; }
+    if (action === "revoke-api-key") {
+      if (!window.confirm("Revoke this API key? Software using it will lose access immediately.")) return;
+      await api(`/api/integrations/api-keys/${encodeURIComponent(target.dataset.keyId)}`, {method:"DELETE"});
+      state.lastApiKey = null;
+      state.snapshot.integrations = await api('/api/integrations');
+      render(); toast('API key revoked'); return;
+    }
+    if (action === "set-order-fulfillment") {
+      const fulfillmentMethod = target.dataset.fulfillment;
+      const destination = fulfillmentMethod === "delivery" ? document.getElementById(`fulfillment-address-${target.dataset.tripId}`)?.value || "" : "";
+      const response = await api(`/api/trips/${encodeURIComponent(target.dataset.tripId)}/fulfillment`, { method: "POST", body: { fulfillmentMethod, destination } });
+      state.snapshot = response.snapshot;
+      render();
+      toast(fulfillmentMethod === "delivery" ? "Added to delivery queue" : "Saved as customer pickup");
       return;
     }
     if (action === "sync-channel") {
@@ -4803,6 +5397,14 @@ app.addEventListener("click", async (event) => {
       await dispatchSelectedRoute();
       return;
     }
+    if (action === "optimize-route-draft") { await optimizeRouteDraft(); return; }
+    if (action === "move-draft-stop") {
+      const ids = selectedRouteOrders().map(trip => trip.id);
+      const index = ids.indexOf(target.dataset.tripId);
+      const next = index + (target.dataset.direction === "up" ? -1 : 1);
+      if (index >= 0 && next >= 0 && next < ids.length) { [ids[index],ids[next]] = [ids[next],ids[index]]; state.routeDraftIds = ids; refreshRouteDraft(); }
+      return;
+    }
     if (action === "assign-selected-orders") {
       await assignSelectedOrders();
       return;
@@ -4812,14 +5414,22 @@ app.addEventListener("click", async (event) => {
       return;
     }
     if (action === "show-route-preview") {
-      document.querySelector("#dispatcher-map")?.closest(".map-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      state.routePreviewHidden = false;
+      state.operationsPane = state.operationsPane === "history" ? "map" : "orders";
+      state.routePreviewOpen = state.operationsPane === "orders";
+      render();
+      if (window.matchMedia("(max-width: 1100px)").matches) document.querySelector("#route-preview")?.scrollIntoView({ behavior: "smooth", block: "start" });
       drawMap("dispatcher-map", dispatcherMapTrips());
       return;
     }
+    if (action === "close-route-preview") {
+      state.routePreviewOpen = false; state.routePreviewHidden = true; render(); return;
+    }
     if (action === "clear-order-selection") {
       state.selectedOrderIds.clear();
+      state.routeDraftIds = [];
       syncSelectionControls("order");
-      drawMap("dispatcher-map", dispatcherMapTrips());
+      refreshRouteDraft();
       return;
     }
     if (action === "complete-selected-active") {
@@ -4865,6 +5475,12 @@ app.addEventListener("click", async (event) => {
     if (action === "save-active-delivery") {
       await saveOrderChanges(target.dataset.tripId);
       return;
+    }
+    if (action === "undo-auto-completion") {
+      if (!window.confirm("Reopen this GPS-detected delivery? Its saved mileage and audit history will be preserved.")) return;
+      const response = await api(`/api/trips/${target.dataset.tripId}/undo-auto-completion`, { method: "POST", body: {} });
+      if (response.snapshot) state.snapshot = response.snapshot;
+      toast("Delivery reopened"); render(); return;
     }
     if (action === "complete-active-delivery") {
       await completeActiveDelivery(target.dataset.tripId, target.dataset.tripName);
@@ -5002,6 +5618,7 @@ app.addEventListener("dragend", async () => {
 
 app.addEventListener("submit", async (event) => {
   const form = event.target;
+  if (form.id === "my-driver-profile-form") return;
   event.preventDefault();
   const submitButton = form.querySelector('[type="submit"]');
   const submitLabel = submitButton?.textContent || "";
@@ -5016,8 +5633,24 @@ app.addEventListener("submit", async (event) => {
       await updateCourierRequest(form);
       return;
     }
+    if (form.id === "create-api-key") {
+      const response = await api('/api/integrations/api-keys', {method:'POST',body:{name:form.elements.name.value,scopes:Array.from(form.querySelectorAll('input[name="scope"]:checked'),item=>item.value)}});
+      state.lastApiKey = response.token;
+      state.snapshot.integrations = await api('/api/integrations');
+      render(); toast('API key created'); return;
+    }
     if (form.matches("[data-channel-connect]")) {
       await connectChannel(form);
+      return;
+    }
+    if (form.id === "signup-form") {
+      const submit=form.querySelector('button[type="submit"]');
+      submit.disabled=true; submit.textContent="Creating your workspace…";
+      try {
+        const response=await api("/api/auth/register",{method:"POST",auth:false,body:formObject(form)});
+        state.auth=response.session; state.snapshot=response.snapshot; state.company=response.snapshot.company;
+        writeStoredAuth(state.auth); window.history.replaceState({},"","/operations"); render(); connectSnapshotStream();
+      } catch(error) { state.loginError=error.message; renderSignup(); }
       return;
     }
     if (form.id === "login-form") {
@@ -5095,6 +5728,7 @@ app.addEventListener("submit", async (event) => {
       const response = await api("/api/deliveries", { method: "POST", body });
       if (response.snapshot) state.snapshot = response.snapshot;
       state.optimizerPlan = null;
+      state.createDeliveryOpen = false;
       toast("Delivery added to the queue");
       render();
       return;
@@ -5207,8 +5841,24 @@ app.addEventListener("submit", async (event) => {
   }
 });
 
+// Dismiss transient tools without closing a form or losing its draft.
+document.addEventListener("click", (event) => {
+  document.querySelectorAll(".bulk-more[open]").forEach((menu) => {
+    if (!menu.contains(event.target)) menu.open = false;
+  });
+});
+
 window.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || !state.editingDriverId) return;
+  if (event.key !== "Escape") return;
+  const focusedMenu = document.activeElement?.closest(".bulk-more[open], .nav-more[open]");
+  const menu = focusedMenu || document.querySelector(".bulk-more[open]");
+  if (menu) {
+    event.preventDefault();
+    menu.open = false;
+    menu.querySelector("summary")?.focus();
+    return;
+  }
+  if (!state.editingDriverId) return;
   state.editingDriverId = "";
   render();
 });
@@ -5243,7 +5893,7 @@ app.addEventListener("change", (event) => {
     if (target.checked) state.selectedOrderIds.add(target.value);
     else state.selectedOrderIds.delete(target.value);
     syncSelectionControls("order");
-    drawMap("dispatcher-map", dispatcherMapTrips());
+    refreshRouteDraft();
     return;
   }
   if (target.matches("[data-active-order-select]")) {
@@ -5258,7 +5908,7 @@ app.addEventListener("change", (event) => {
       else state.selectedOrderIds.delete(checkbox.value);
     }
     syncSelectionControls("order");
-    drawMap("dispatcher-map", dispatcherMapTrips());
+    refreshRouteDraft();
     return;
   }
   if (target.matches("[data-select-all-active]")) {
@@ -5277,9 +5927,31 @@ app.addEventListener("change", (event) => {
   if (target.id === "bulk-order-driver") {
     state.bulkDriverId = target.value;
     state.bulkRate = Number(driver?.defaultRate || 0);
-    drawMap("dispatcher-map", dispatcherMapTrips());
+    refreshRouteDraft();
   }
 });
+
+app.addEventListener("dragstart", event => {
+  const stop = event.target.closest("[data-draft-stop]");
+  if (!stop) return;
+  draggedDraftStop = stop.dataset.draftStop;
+  event.dataTransfer.setData("text/plain", draggedDraftStop);
+  event.dataTransfer.effectAllowed = "move";
+});
+app.addEventListener("dragover", event => { if (draggedDraftStop && event.target.closest("[data-draft-stop]")) event.preventDefault(); });
+app.addEventListener("drop", event => {
+  const stop = event.target.closest("[data-draft-stop]");
+  if (!draggedDraftStop || !stop) return;
+  event.preventDefault();
+  const ids = selectedRouteOrders().map(trip => trip.id);
+  const from = ids.indexOf(draggedDraftStop), to = ids.indexOf(stop.dataset.draftStop);
+  if (from >= 0 && to >= 0) { ids.splice(from,1); ids.splice(to,0,draggedDraftStop); state.routeDraftIds=ids; refreshRouteDraft(); }
+  draggedDraftStop = null;
+});
+app.addEventListener("dragend", () => { draggedDraftStop = null; });
+app.addEventListener("toggle", event => {
+  if (event.target.matches(".driver-route-preview") && event.target.open) requestAnimationFrame(() => drawMap("driver-map", state.driverMapTrips || []));
+}, true);
 
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
@@ -5297,7 +5969,7 @@ window.addEventListener("hashchange", syncSectionNavigation);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js?v=46").catch(() => {});
+    navigator.serviceWorker.register("/service-worker.js?v=103").catch(() => {});
   });
 }
 
@@ -5357,10 +6029,22 @@ function connectSnapshotStream() {
       const serialized = JSON.stringify(response.snapshot);
       const changed = serialized !== state.lastSnapshotSerialized;
       state.snapshot = response.snapshot;
+      if (state.auth.role === "dispatcher" && previousSnapshot) {
+        const known = new Set(previousSnapshot.trips.map(trip=>trip.id));
+        const arrivals = (response.snapshot.trips || []).filter(trip=>!known.has(trip.id) && trip.status === "queued" && !outsideDailyOrderWindow(trip) && !isNonDeliveryOrder(trip));
+        if(arrivals.length) toast(`${arrivals.length} new ${arrivals.length === 1 ? "delivery" : "deliveries"} ready to dispatch`);
+      }
+      // My Mileage is the owner's private view, not the staff report snapshot.
+      // Keep its health/trips in step with the authenticated polling response.
+      if (state.auth?.role === "dispatcher") state.myMileage = response.snapshot.myMileage || null;
       reconcilePublishing(previousSnapshot, response.snapshot);
+      void resumeGps();
       state.lastSnapshotSerialized = serialized;
       writeStoredAuth(state.auth);
+      // Stable polling must not replace the whole workspace every four seconds:
+      // that closes menus, detaches controls, and disrupts order editing.
       if (changed) maybeRender();
+      assignmentAlerts.receive(response.snapshot);
     } catch {
       // A temporary network failure should not sign out a driver mid-route.
     } finally {
@@ -5369,6 +6053,16 @@ function connectSnapshotStream() {
   };
   scheduleLiveRefresh(refresh, generation);
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.auth?.role) {
+    void resumeGps();
+    connectSnapshotStream();
+  }
+});
+window.addEventListener("online", () => {
+  if (state.auth?.role) { void resumeGps(); connectSnapshotStream(); }
+});
 
 function connectCustomerStream(token) {
   stopLiveRefresh();
@@ -5409,6 +6103,7 @@ async function refreshMapsConfig() {
 async function init() {
   render();
   await refreshMapsConfig();
+  if (window.location.pathname === "/signup") { state.auth = null; renderSignup(); return; }
   try {
     if (state.route.name === "customer") {
       if (state.route.token) {
@@ -5451,9 +6146,11 @@ async function init() {
     state.auth = response.session;
     state.snapshot = response.snapshot;
     state.lastSnapshotSerialized = JSON.stringify(response.snapshot);
+    state.myMileage = response.snapshot.myMileage || null;
     writeStoredAuth(state.auth);
     connectSnapshotStream();
     render();
+    void resumeGps();
   } catch (error) {
     if (state.route.name === "invite") {
       state.inviteProfile = null;
@@ -5469,4 +6166,79 @@ async function init() {
   }
 }
 
+async function refreshMyMileage() {
+  const token = state.auth?.token;
+  if (state.auth?.role !== "dispatcher" || !state.auth.mileageDriverId) return;
+  try {
+    const next = await api("/api/my-mileage");
+    if (state.auth?.token !== token) return;
+    state.myMileage = next; state.myMileageError = "";
+    if (state.dispatcherView === "my-mileage" && !document.activeElement?.closest("form, dialog")) render();
+  } catch (error) {
+    if (state.auth?.token !== token) return;
+    state.myMileageError = error.message;
+    if (state.dispatcherView === "my-mileage") render();
+  }
+}
+
+function renderMyMileage() {
+  const linked = Boolean(state.auth?.mileageDriverId);
+  const tab = state.myMileageTab;
+  const profile = getDrivers().find(d => d.id === state.auth.mileageDriverId);
+  const content = `<div class="topbar"><div><p class="eyebrow">Your private trip log</p><h1 class="page-title">My Mileage</h1><p class="page-subtitle">Review your drives. Submit business mileage once a week. Keep your dispatcher access.</p></div><button class="button secondary" data-action="dispatcher-view" data-view="operations">Back to dispatch</button></div>
+    ${state.myMileageError ? `<p class="mileage-error" role="alert">${h(state.myMileageError)}</p>` : ""}
+    ${!linked ? `<section class="panel"><div class="panel-body"><h2>Add yourself as a driver</h2><p>This uses your current login. No new password or invitation. Recording stays off until you explicitly enable it.</p>
+      <form id="my-driver-profile-form" class="form-grid">
+        <div class="field full"><label for="my-driver-name">Your name</label><input class="input" id="my-driver-name" name="name" required maxlength="120" value="${h(state.auth.name === "Dispatcher" ? "" : state.auth.name)}"></div>
+        <div class="field"><label for="my-driver-vehicle">Vehicle (optional for now)</label><input class="input" id="my-driver-vehicle" name="vehicle" maxlength="160" placeholder="e.g. Honda Civic · ABCD 123"></div>
+        <div class="field"><label for="my-driver-rate">Rate · CAD per km (optional for now)</label><input class="input" id="my-driver-rate" name="defaultRate" type="number" min="0" max="100" step="0.000001" placeholder="Not set"></div>
+        <div class="field full"><button class="button" type="submit">Add my driver profile</button><p class="field-help">Set your vehicle and rate before submitting a report. Personal trips are never included in staff reports.</p></div>
+      </form></div></section>` : `<div data-personal-mileage>
+      <nav class="workspace-switcher" aria-label="My mileage views">${[["trips", "Trips"], ["report", "Weekly report"], ["profile", "Tracking settings"]].map(([id, label]) => `<button type="button" data-my-mileage-tab="${id}" class="${tab === id ? "active" : ""}" ${tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join("")}</nav>
+      <p class="privacy-copy">${h(profile?.name || state.auth.name)} · ${h(profile?.vehicle || "Vehicle not set")} · ${state.myMileage?.kmRate == null ? "Rate not set — update it in Team before submitting" : `${formatRate(state.myMileage.kmRate)} CAD`}</p>
+      ${!state.myMileage ? '<div class="panel empty">Loading your private mileage…</div>' : tab === "profile" ? personalMileageUI.settingsHtml() : tab === "report" ? personalMileageUI.reportHtml() : personalMileageUI.summaryHtml() + personalMileageUI.tripsHtml()}
+    </div>`}`;
+  app.innerHTML = shellHtml(content);
+  personalMileageUI.mount();
+}
+
+app.addEventListener("click", event => {
+  const button = event.target.closest("[data-my-mileage-tab]");
+  if (!button) return;
+  state.myMileageTab = button.dataset.myMileageTab; render();
+});
+app.addEventListener("submit", async event => {
+  if (event.target.id !== "my-driver-profile-form") return;
+  event.preventDefault();
+  const button = event.target.querySelector('button[type="submit"]'); button.disabled = true;
+  try {
+    const response = await api("/api/me/driver-profile", { method: "POST", body: Object.fromEntries(new FormData(event.target)) });
+    state.auth = response.session; state.snapshot = response.snapshot; state.myMileage = response.mileage; state.myMileageError = "";
+    writeStoredAuth(state.auth); render(); toast("Your driver profile is ready. Recording is still off until you enable it.");
+  } catch (error) { state.myMileageError = error.message; render(); }
+});
+
+const personalMileageUI = createMileageUI({ personal: true, loadMap:loadOpenMap,
+  api: (path, options) => api(path.replace("/api/mileage", "/api/my-mileage"), options),
+  getAuth: () => state.auth?.role === "dispatcher" && state.auth.mileageDriverId ? { ...state.auth, role: "driver", driverId: state.auth.mileageDriverId } : null,
+  getData: () => state.myMileage,
+  setData: next => { state.myMileage = next; }, render, toast, requestText,
+  navigate: action => { state.myMileageTab = action === "open-report" ? "report" : action === "open-settings" ? "profile" : "trips"; render(); }
+});
+setInterval(() => { if (state.dispatcherView === "my-mileage") void refreshMyMileage(); }, 30000);
+
+const mileageUI = createMileageUI({ api, loadMap:loadOpenMap, getAuth: () => state.auth, getData: () => state.snapshot?.mileage,
+  setData: next => { if (state.snapshot) state.snapshot.mileage = next; }, render, toast, requestText });
+const assignmentAlerts = createAssignmentAlerts({api,getAuth:()=>state.auth,getSnapshot:()=>state.snapshot,
+  onSnapshot:next=>{state.snapshot=next;render();},notify:toast,
+  openRoute:()=>{window.location.hash="today";syncSectionNavigation();}});
 init();
+
+// Age out visible imports without interrupting an order form or search in progress.
+let dailyWindowIds = '';
+setInterval(() => {
+  const expiredIds = getTrips().filter(trip => outsideDailyOrderWindow(trip)).map(trip => trip.id).sort().join(',');
+  if (expiredIds === dailyWindowIds || document.hidden || document.activeElement?.matches('input, textarea, select')) return;
+  dailyWindowIds = expiredIds;
+  if (state.auth?.role === 'dispatcher' && state.dispatcherView === 'operations') renderDispatcher();
+}, 60000);

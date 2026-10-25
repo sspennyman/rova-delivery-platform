@@ -1,1140 +1,126 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <script>if(["floral-jet.spennyman.chatgpt.site","www.floraljet.llc"].includes(location.hostname))location.replace(`https://floraljet.llc${location.pathname}${location.search}${location.hash}`)</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Industries | Rivo</title>
-  <meta name="description" content="Rivo helps florists, pharmacies, restaurants, retailers, and courier companies coordinate in-house drivers, third-party couriers, order intake, routes, tracking, proof, and delivery records.">
-  <link rel="canonical" href="https://floraljet.llc/industries.html">
-  <link rel="icon" href="assets/rova-mark.svg" type="image/svg+xml">
-  <style>
-  :root {
-    color-scheme: light;
-    --ink: #10241f;
-    --muted: #5e6f6b;
-    --paper: #f7f8f1;
-    --panel: #fffef7;
-    --line: #d8e5d6;
-    --soft: #e8f6df;
-    --dark: #10241f;
-    --dark-2: #18342d;
-    --green: #35bd72;
-    --green-dark: #168653;
-    --blue: #1e66d0;
-    --amber: #ffc947;
-    --red: #d64545;
-    --cream: #fff6cf;
-    --mint: #dff7d6;
-    --shadow: 0 22px 70px rgba(16, 36, 31, 0.14);
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--paper);
-    color: var(--ink);
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    letter-spacing: 0;
-  }
-  a { color: inherit; }
-  .wrap { width: min(1200px, calc(100% - 32px)); margin: 0 auto; }
-  .skip-link {
-    position: absolute;
-    top: -80px;
-    left: 14px;
-    z-index: 20;
-    padding: 9px 12px;
-    border-radius: 8px;
-    background: var(--ink);
-    color: #fff;
-  }
-  .skip-link:focus { top: 14px; }
-  .nav {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    border-bottom: 1px solid rgba(16, 36, 31, 0.09);
-    background: rgba(255, 254, 247, 0.92);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 1px 20px rgba(16, 36, 31, 0.08);
-  }
-  .nav-inner {
-    min-height: 68px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--ink);
-    text-decoration: none;
-    font-weight: 900;
-  }
-  .brand-logo {
-    position: relative;
-    width: 38px;
-    height: 38px;
-    overflow: hidden;
-    border: 1px solid rgba(16, 36, 31, 0.12);
-    border-radius: 8px;
-    background: #020817;
-  }
-  .brand-logo img {
-    display: block;
-    width: 160px;
-    max-width: none;
-    height: auto;
-    transform: translate(-20px, -34px);
-  }
-  .brand > span:last-child { font-size: 1.08rem; }
-  .links {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-    gap: 14px;
-    color: var(--muted);
-    font-size: 0.95rem;
-  }
-  .links a {
-    color: inherit;
-    text-decoration: none;
-  }
-  .links a:hover,
-  .links a:focus { color: var(--ink); }
-  .links .login-link {
-    border: 1px solid rgba(16, 36, 31, 0.18);
-    border-radius: 8px;
-    padding: 8px 11px;
-    background: #fff;
-    color: var(--ink);
-    font-weight: 850;
-  }
-  .nav-cta {
-    border: 1px solid rgba(23, 166, 115, 0.9);
-    border-radius: 8px;
-    padding: 8px 11px;
-    background: var(--green);
-    color: #fff !important;
-    font-weight: 850;
-  }
-  .hero {
-    position: relative;
-    overflow: hidden;
-    color: var(--ink);
-    border-bottom: 1px solid var(--line);
-    background:
-      radial-gradient(circle at 85% 18%, rgba(255, 201, 71, 0.44), transparent 26%),
-      radial-gradient(circle at 8% 24%, rgba(53, 189, 114, 0.24), transparent 30%),
-      linear-gradient(135deg, #fffef7 0%, #f5f9ed 52%, #dff7d6 100%);
-  }
-  .hero::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.34;
-    background-image:
-      linear-gradient(rgba(16, 36, 31, 0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(16, 36, 31, 0.07) 1px, transparent 1px);
-    background-size: 52px 52px;
-  }
-  .hero-grid {
-    position: relative;
-    z-index: 1;
-    min-height: min(800px, 86svh);
-    display: grid;
-    grid-template-columns: minmax(0, 0.82fr) minmax(470px, 1.18fr);
-    gap: clamp(28px, 5vw, 58px);
-    align-items: center;
-    padding: clamp(58px, 8vw, 106px) 0 48px;
-  }
-    .eyebrow {
-    margin: 0 0 12px;
-    color: var(--green);
-    font-weight: 900;
-    text-transform: uppercase;
-    font-size: 0.78rem;
-    letter-spacing: 0.08em;
-  }
-  h1, h2, h3 { letter-spacing: 0; }
-  h1 {
-    margin: 0;
-    max-width: 760px;
-    font-size: 5.55rem;
-    line-height: 0.93;
-    font-weight: 900;
-  }
-  h2 {
-    margin: 0;
-    font-size: 2.25rem;
-    line-height: 1.08;
-    font-weight: 900;
-  }
-  h3 { margin: 0; }
-  .lede {
-    max-width: 720px;
-    margin: 20px 0 0;
-    color: var(--muted);
-    font-size: 1.16rem;
-    line-height: 1.62;
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-top: 24px;
-  }
-  .button {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    border: 1px solid var(--green);
-    border-radius: 8px;
-    padding: 11px 15px;
-    background: var(--green);
-    color: #fff;
-    text-decoration: none;
-    font-weight: 850;
-    cursor: pointer;
-  }
-  .button:hover,
-  .button:focus { background: var(--green-dark); border-color: var(--green-dark); }
-  .button.secondary {
-    border-color: rgba(16, 36, 31, 0.18);
-    background: #fff;
-    color: var(--ink);
-  }
-  .button.secondary:hover,
-  .button.secondary:focus { background: var(--soft); color: var(--ink); }
-  .button.subtle {
-    border-color: var(--line);
-    background: #fff;
-    color: var(--dark);
-  }
-  .button.full { width: 100%; }
-  .pill-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 22px;
-  }
-  .pill {
-    border: 1px solid rgba(16, 36, 31, 0.1);
-    border-radius: 999px;
-    padding: 7px 10px;
-    background: rgba(255, 255, 255, 0.72);
-    color: var(--ink);
-    font-size: 0.9rem;
-    font-weight: 800;
-  }
-  .product-card {
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    background: #0f1a21;
-    box-shadow: 0 34px 100px rgba(0, 0, 0, 0.34);
-    overflow: hidden;
-    transform: translateZ(0);
-  }
-  .hero-proof {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-    margin-top: 26px;
-    max-width: 650px;
-  }
-  .hero-proof div {
-    border: 1px solid rgba(16, 36, 31, 0.1);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.7);
-    padding: 12px;
-  }
-  .hero-proof strong {
-    display: block;
-    font-size: 1.22rem;
-    font-weight: 900;
-  }
-  .hero-proof span {
-    display: block;
-    margin-top: 3px;
-    color: var(--muted);
-    font-size: 0.85rem;
-    font-weight: 750;
-  }
-  .product-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    padding: 14px 16px;
-    color: rgba(255, 255, 255, 0.86);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: #111f27;
-  }
-  .window-dots {
-    display: inline-flex;
-    gap: 6px;
-  }
-  .window-dots span {
-    width: 10px;
-    aspect-ratio: 1;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.26);
-  }
-  .window-dots span:nth-child(1) { background: #ff5f57; }
-  .window-dots span:nth-child(2) { background: #ffbd2e; }
-  .window-dots span:nth-child(3) { background: #28c840; }
-  .status-dot {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: var(--green);
-    font-size: 0.9rem;
-    font-weight: 850;
-  }
-  .status-dot::before {
-    content: "";
-    width: 9px;
-    aspect-ratio: 1;
-    border-radius: 50%;
-    background: var(--green);
-  }
-  .dispatch-board {
-    display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    min-height: 0;
-    background: #0f1a21;
-  }
-  .app-sidebar {
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
-    background: #0c141a;
-    padding: 14px;
-  }
-  .app-brand {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-bottom: 18px;
-    color: #fff;
-    font-weight: 900;
-  }
-  .app-logo {
-    width: 28px;
-    height: 28px;
-    overflow: hidden;
-    border-radius: 7px;
-    background: #020817;
-  }
-  .app-logo img {
-    display: block;
-    width: 120px;
-    max-width: none;
-    height: auto;
-    transform: translate(-15px, -25px);
-  }
-  .side-group {
-    margin: 16px 0 6px;
-    color: rgba(255, 255, 255, 0.36);
-    font-size: 0.72rem;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-  .side-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 36px;
-    margin-bottom: 7px;
-    border-radius: 8px;
-    padding: 8px 9px;
-    color: rgba(255, 255, 255, 0.66);
-    font-size: 0.88rem;
-    font-weight: 750;
-  }
-  .side-item.active {
-    background: rgba(23, 166, 115, 0.16);
-    color: #fff;
-  }
-  .side-count {
-    color: var(--green);
-  }
-  .app-main {
-    padding: 16px;
-    min-width: 0;
-  }
-  .app-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 14px;
-    margin-bottom: 14px;
-  }
-  .app-head strong {
-    display: block;
-    color: #fff;
-    font-size: 1.05rem;
-  }
-  .app-head span,
-  .app-label {
-    color: rgba(255, 255, 255, 0.54);
-    font-size: 0.85rem;
-  }
-  .kpi-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-  .kpi {
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    padding: 10px;
-  }
-  .kpi strong {
-    display: block;
-    color: #fff;
-    font-size: 1.25rem;
-  }
-  .kpi span {
-    display: block;
-    margin-top: 3px;
-    color: rgba(255, 255, 255, 0.52);
-    font-size: 0.8rem;
-    font-weight: 750;
-  }
-  .kanban {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(145px, 1fr));
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 8px;
-    overscroll-behavior-inline: contain;
-  }
-  .lane {
-    display: grid;
-    align-content: start;
-    gap: 8px;
-    min-width: 145px;
-  }
-  .lane-title {
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 0.78rem;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-  .dispatch-row {
-    display: grid;
-    gap: 9px;
-    min-width: 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.055);
-    padding: 12px;
-  }
-  .dispatch-row.hot {
-    border-color: rgba(240, 180, 41, 0.4);
-    background: rgba(240, 180, 41, 0.08);
-  }
-  .dispatch-row strong { display: block; color: #fff; }
-  .dispatch-row span {
-    display: block;
-    margin-top: 4px;
-    color: rgba(255, 255, 255, 0.56);
-    font-size: 0.9rem;
-    overflow-wrap: anywhere;
-  }
-  .dispatch-row strong { overflow-wrap: anywhere; }
-  .row-top,
-  .card-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .order-id,
-  .card-foot span {
-    margin: 0;
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 0.78rem;
-    font-weight: 800;
-  }
-  .dispatch-board .mini-tag {
-    background: rgba(23, 166, 115, 0.15);
-    color: #8ff0bd;
-  }
-  .route-panel {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: minmax(160px, 0.58fr) minmax(0, 1fr);
-    gap: 14px;
-    align-items: center;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 14px;
-    background: #101c23;
-  }
-  .route-map {
-    position: relative;
-    min-height: 128px;
-    margin: 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    background:
-      linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
-      linear-gradient(0deg, rgba(255,255,255,0.04) 1px, transparent 1px),
-      #0c141a;
-    background-size: 34px 34px;
-  }
-  .route-line {
-    position: absolute;
-    inset: 28px 34px 38px 30px;
-    border-left: 3px solid var(--green);
-    border-bottom: 3px solid var(--blue);
-    border-radius: 0 0 0 18px;
-  }
-  .map-pin {
-    position: absolute;
-    width: 12px;
-    aspect-ratio: 1;
-    border: 2px solid #fff;
-    border-radius: 50%;
-    background: var(--green);
-  }
-  .pin-a { left: 28px; top: 24px; }
-  .pin-b { left: 94px; top: 98px; background: var(--blue); }
-  .pin-c { right: 34px; bottom: 32px; background: var(--amber); }
-  .driver-card {
-    display: grid;
-    gap: 8px;
-    margin-top: 0;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.72);
-  }
-  .driver-card strong {
-    color: #fff;
-  }
-  .driver-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    color: rgba(255, 255, 255, 0.58);
-    font-size: 0.86rem;
-  }
-  .badge {
-    width: fit-content;
-    border: 1px solid rgba(240, 180, 41, 0.4);
-    border-radius: 999px;
-    background: rgba(240, 180, 41, 0.12);
-    color: #ffd36b;
-    padding: 5px 8px;
-    font-size: 0.78rem;
-    font-weight: 900;
-  }
-  main { padding: 42px 0 64px; }
-  .intro-block {
-    display: grid;
-    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-    gap: 32px;
-    align-items: end;
-    margin: 18px 0 28px;
-  }
-  .intro-block p {
-    margin: 0;
-    color: var(--muted);
-    line-height: 1.62;
-    font-size: 1.06rem;
-  }
-  .proof-strip {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-bottom: 42px;
-  }
-  .proof-item {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 18px;
-  }
-  .proof-item strong {
-    display: block;
-    color: var(--ink);
-    font-size: 1.72rem;
-    line-height: 1;
-    font-weight: 900;
-  }
-  .proof-item span {
-    display: block;
-    margin-top: 8px;
-    color: var(--muted);
-    font-weight: 760;
-  }
-  .section-head {
-    display: flex;
-    align-items: end;
-    justify-content: space-between;
-    gap: 20px;
-    margin: 18px 0 20px;
-  }
-  .section-note {
-    max-width: 560px;
-    margin: 0;
-    color: var(--muted);
-    line-height: 1.55;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-    gap: 14px;
-  }
-  .card {
-    display: grid;
-    gap: 11px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 18px;
-    box-shadow: 0 1px 2px rgba(21, 32, 28, 0.04);
-  }
-  .card.highlight {
-    border-color: rgba(23, 166, 115, 0.32);
-    box-shadow: var(--shadow);
-  }
-  .card p {
-    margin: 0;
-    color: var(--muted);
-    line-height: 1.5;
-  }
-  .metric {
-    color: var(--ink);
-    font-size: 2rem;
-    line-height: 1;
-    font-weight: 900;
-  }
-  .band {
-    margin-top: 34px;
-    border: 1px solid rgba(39, 110, 241, 0.14);
-    border-radius: 8px;
-    background: linear-gradient(135deg, #fff, #eef3f9);
-    padding: clamp(22px, 5vw, 36px);
-  }
-  .band p { color: var(--muted); line-height: 1.58; }
-  .mode-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-  }
-  .mode-card {
-    display: grid;
-    gap: 14px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 20px;
-    min-height: 290px;
-  }
-  .mode-card:nth-child(2) { background: #f0fbeb; }
-  .mode-card:nth-child(3) { background: #eff6ff; }
-  .mode-card:nth-child(4) { background: #fff7d8; }
-  .mode-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .mode-tag {
-    border-radius: 999px;
-    background: rgba(16, 36, 31, 0.08);
-    padding: 5px 8px;
-    color: var(--ink);
-    font-size: 0.78rem;
-    font-weight: 900;
-  }
-  .mode-card p,
-  .mode-card li {
-    color: var(--muted);
-    line-height: 1.5;
-  }
-  .mode-card ul {
-    margin: 0;
-    padding-left: 18px;
-  }
-  .pricing-strip {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    margin: 0 0 22px;
-  }
-  .pricing-strip div {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 16px;
-  }
-  .pricing-strip strong {
-    display: block;
-    font-size: 1.24rem;
-    font-weight: 900;
-  }
-  .pricing-strip span {
-    display: block;
-    margin-top: 5px;
-    color: var(--muted);
-    line-height: 1.4;
-  }
-  .price-note {
-    border-left: 4px solid var(--green);
-    background: #fff;
-  }
-  .price-table {
-    display: grid;
-    gap: 10px;
-    margin-top: 16px;
-  }
-  .revenue-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 18px;
-  }
-  .revenue-item {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 16px;
-  }
-  .revenue-item strong {
-    display: block;
-    font-size: 1.45rem;
-    line-height: 1;
-    font-weight: 900;
-  }
-  .revenue-item span {
-    display: block;
-    margin-top: 8px;
-    color: var(--muted);
-    line-height: 1.42;
-  }
-  .price-row {
-    display: grid;
-    grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
-    gap: 12px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
-  }
-  .price-row:last-child { border-bottom: 0; padding-bottom: 0; }
-  .price-row strong {
-    color: var(--ink);
-  }
-  .price-row span {
-    color: var(--muted);
-    line-height: 1.45;
-  }
-  .control-band {
-    margin-top: 42px;
-    border: 1px solid rgba(143, 240, 189, 0.18);
-    border-radius: 8px;
-    background: linear-gradient(135deg, #10241f, #152d3a);
-    color: #fff;
-    padding: clamp(22px, 5vw, 38px);
-    overflow: hidden;
-  }
-  .control-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 0.78fr);
-    gap: 28px;
-    align-items: stretch;
-  }
-  .control-band p {
-    color: rgba(255, 255, 255, 0.72);
-    line-height: 1.58;
-  }
-  .control-band .eyebrow { color: #8ff0bd; }
-  .control-card {
-    display: grid;
-    gap: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.08);
-    padding: 18px;
-  }
-  .control-card strong {
-    display: block;
-    font-size: 1.35rem;
-  }
-  .control-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    padding-bottom: 9px;
-    color: rgba(255, 255, 255, 0.78);
-  }
-  .control-row:last-child { border-bottom: 0; padding-bottom: 0; }
-  .roadmap-list {
-    counter-reset: roadmap;
-    display: grid;
-    gap: 10px;
-    margin: 0;
-    padding: 0;
-  }
-  .roadmap-list li {
-    counter-increment: roadmap;
-    display: grid;
-    grid-template-columns: 34px 1fr;
-    gap: 10px;
-    align-items: start;
-    list-style: none;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 12px;
-    color: var(--muted);
-    line-height: 1.42;
-  }
-  .roadmap-list li::before {
-    content: counter(roadmap);
-    display: inline-grid;
-    place-items: center;
-    width: 34px;
-    aspect-ratio: 1;
-    border-radius: 50%;
-    background: var(--dark);
-    color: #fff;
-    font-weight: 900;
-  }
-  .revenue-stack {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin-top: 18px;
-  }
-  .portal-showcase {
-    display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-    gap: 28px;
-    align-items: center;
-    margin-top: 42px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--dark);
-    color: #fff;
-    padding: clamp(22px, 5vw, 38px);
-    overflow: hidden;
-  }
-  .portal-showcase p { color: rgba(255, 255, 255, 0.72); line-height: 1.58; }
-  .portal-showcase .eyebrow { color: #8ff0bd; }
-  .portal-showcase .button.secondary {
-    border-color: rgba(255, 255, 255, 0.22);
-    background: transparent;
-    color: #fff;
-  }
-  .portal-card {
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    background: #0f1a21;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
-    overflow: hidden;
-  }
-  .support-block {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
-    gap: 20px;
-    align-items: stretch;
-    margin-top: 42px;
-  }
-  .support-copy {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: clamp(22px, 4vw, 34px);
-  }
-  .support-card {
-    display: grid;
-    align-content: space-between;
-    gap: 20px;
-    border-radius: 8px;
-    background: var(--cream);
-    padding: clamp(22px, 4vw, 34px);
-  }
-  .support-card strong {
-    display: block;
-    font-size: 2.2rem;
-    line-height: 1;
-  }
-  .city-band {
-    margin-top: 42px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: clamp(22px, 5vw, 36px);
-  }
-  .city-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 18px;
-  }
-  .city-list span {
-    border-radius: 999px;
-    background: var(--soft);
-    color: var(--ink);
-    padding: 8px 10px;
-    font-weight: 800;
-  }
-  .split {
-    display: grid;
-    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-    gap: 24px;
-    align-items: start;
-  }
-  .steps {
-    display: grid;
-    gap: 12px;
-  }
-  .step {
-    display: grid;
-    grid-template-columns: 32px 1fr;
-    gap: 10px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 14px;
-  }
-  .step span {
-    display: inline-grid;
-    place-items: center;
-    width: 32px;
-    aspect-ratio: 1;
-    border-radius: 50%;
-    background: var(--green);
-    color: #fff;
-    font-weight: 900;
-  }
-  .step p { margin: 4px 0 0; color: var(--muted); line-height: 1.45; }
-  .page-hero {
-    border-bottom: 1px solid var(--line);
-    background: linear-gradient(135deg, #fff, #edf3f7);
-  }
-  .page-hero .wrap { padding: 52px 0 38px; }
-  .page-hero h1 { font-size: 4.2rem; }
-  .page-hero .lede { color: var(--muted); }
-  .demo-shell {
-    display: grid;
-    grid-template-columns: 330px minmax(0, 1fr);
-    gap: 16px;
-  }
-  .demo-panel {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 16px;
-  }
-  .demo-panel h2 { font-size: 1.35rem; }
-  .field {
-    display: grid;
-    gap: 6px;
-    margin-top: 12px;
-  }
-  .field label {
-    font-size: 0.9rem;
-    font-weight: 850;
-  }
-  input, select, textarea {
-    width: 100%;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--paper);
-    color: var(--ink);
-    padding: 10px 11px;
-    font: inherit;
-  }
-  textarea { min-height: 90px; resize: vertical; }
-  .orders {
-    display: grid;
-    gap: 10px;
-  }
-  .order-card {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 14px;
-  }
-  .order-card.selected {
-    border-color: var(--green);
-    box-shadow: 0 0 0 3px rgba(23, 166, 115, 0.12);
-  }
-  .order-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-  }
-  .order-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 10px;
-    color: var(--muted);
-    font-size: 0.9rem;
-  }
-  .mini-tag {
-    border-radius: 999px;
-    background: var(--soft);
-    color: var(--green-dark);
-    padding: 4px 8px;
-    font-weight: 800;
-  }
-  .route-box {
-    display: grid;
-    gap: 10px;
-    margin-top: 14px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--paper);
-    padding: 14px;
-  }
-  .contact-card {
-    max-width: 780px;
-  }
-  .form-note {
-    color: var(--muted);
-    font-size: 0.92rem;
-    line-height: 1.45;
-  }
-  footer {
-    border-top: 1px solid var(--line);
-    background: #fff;
-    padding: 28px 0;
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-  .footer-inner {
-    display: flex;
-    justify-content: space-between;
-    gap: 18px;
-    flex-wrap: wrap;
-  }
-  .footer-links {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .footer-links a {
-    color: var(--muted);
-    text-decoration: none;
-  }
-  @media (max-width: 860px) {
-    .nav-inner,
-    .section-head {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-    .links { justify-content: flex-start; }
-    .hero-grid,
-    .split,
-    .demo-shell,
-    .intro-block,
-    .portal-showcase,
-    .support-block {
-      grid-template-columns: 1fr;
-    }
-    h1 { font-size: 3.35rem; }
-    h2 { font-size: 1.85rem; }
-    .page-hero h1 { font-size: 3rem; }
-    .dispatch-board {
-      grid-template-columns: 1fr;
-      min-height: auto;
-    }
-    .route-panel,
-    .app-sidebar {
-      border: 0;
-    }
-    .route-panel {
-      grid-template-columns: 1fr;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .kanban,
-    .kpi-row,
-    .proof-strip,
-    .mode-grid,
-    .hero-proof,
-    .pricing-strip,
-    .control-grid,
-    .revenue-stack,
-    .revenue-grid,
-    .price-row {
-      grid-template-columns: 1fr;
-    }
-    .hero { background-position: center; }
-  }
-  @media (max-width: 520px) {
-    h1 { font-size: 2.62rem; }
-    .page-hero h1 { font-size: 2.35rem; }
-    .actions .button { width: 100%; }
-  }
-</style>
-  <link rel="stylesheet" href="assets/rova-secondary.css">
+<script src="/assets/appearance.js?v=98"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delivery, driver and mileage software for your business | Rivo</title>
+<meta name="description" content="Manage business deliveries, coordinate your drivers and record mileage with Rivo. Explore workflows for shops, suppliers, independent drivers and delivery teams.">
+<link rel="canonical" href="https://floraljet.llc/industries">
+<link rel="icon" href="/assets/favicon.svg?v=51">
+<link rel="stylesheet" href="/assets/rivo-saas.css?v=61">
+<link rel="stylesheet" href="/assets/rivo-brand-surfaces.css?v=61">
+<link rel="stylesheet" href="/assets/rivo-industries.css?v=61">
+<script src="/assets/rivo-industries.js?v=53" defer></script>
+<link rel="stylesheet" href="/assets/rivo-unified.css?v=61">
+<link rel="stylesheet" href="/assets/appearance.css?v=61">
+<link rel="stylesheet" href="/assets/rivo-site-polish.css?v=61">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Rivo">
+<meta property="og:locale" content="en_CA">
+<meta property="og:title" content="Delivery, driver and mileage software for your business | Rivo">
+<meta property="og:description" content="Manage business deliveries, coordinate your drivers and record mileage with Rivo. Explore workflows for shops, suppliers, independent drivers and delivery teams.">
+<meta property="og:url" content="https://floraljet.llc/industries">
+<meta property="og:image" content="https://floraljet.llc/assets/rivo-social-blue.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Rivo — dispatch, routes and business mileage">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "Organization", "@id": "https://floraljet.llc/#organization", "name": "Rivo", "url": "https://floraljet.llc/", "logo": "https://floraljet.llc/assets/rivo-pinwheel.svg", "email": "rivocanada@gmail.com"}, {"@type": "WebSite", "@id": "https://floraljet.llc/#website", "url": "https://floraljet.llc/", "name": "Rivo", "publisher": {"@id": "https://floraljet.llc/#organization"}, "inLanguage": "en-CA"}, {"@type": "WebPage", "@id": "https://floraljet.llc/industries#webpage", "url": "https://floraljet.llc/industries", "name": "Delivery, driver and mileage software for your business | Rivo", "description": "Manage business deliveries, coordinate your drivers and record mileage with Rivo. Explore workflows for shops, suppliers, independent drivers and delivery teams.", "isPartOf": {"@id": "https://floraljet.llc/#website"}}]}</script>
 </head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <nav class="nav">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html"><span class="brand-logo" aria-hidden="true"><img src="assets/rova-mark.svg" alt=""></span><span>Rivo</span></a>
-    <div class="links">
-      <a href="index.html#platform">Platform</a>
-      <a href="industries.html">Industries</a>
-      <a href="pricing.html">Pricing</a>
-      <a href="contact.html">Contact</a>
-      <a class="login-link" href="https://app.floraljet.llc/">Log in</a>
-      <a class="nav-cta" href="contact.html">Book Onboarding</a>
-    </div>
-  </div>
+<body class="rivo-site industries-page">
+<a class="skip-link" href="#main">Skip to content</a>
+<header>
+<a class="wordmark" href="/">
+<img class="brand-mark" src="/assets/rivo-pinwheel.svg?v=61" alt="" width="32" height="32">Rivo</a>
+<nav aria-label="Main navigation">
+<a href="/#product">Product</a>
+<a href="/industries" aria-current="page">Industries</a>
+<a href="/pricing">Pricing</a>
+<a href="/contact">Book a Demo</a>
 </nav>
-  <header class="page-hero">
-  <div class="wrap">
-    <p class="eyebrow">Customers</p>
-    <h1>Built for businesses using their own drivers, courier partners, or both.</h1>
-    <p class="lede">Rivo connects to any website, store, POS, or API, then brings assignments, courier requests, customer tracking, proof, mileage, and reporting into one place.</p>
-  </div>
+<div class="account">
+<a href="https://app.floraljet.llc/operations">Log in</a>
+<a class="nav-start" href="https://app.floraljet.llc/signup">Start Free</a>
+</div>
 </header>
-<main class="wrap" id="main">
-  <section class="grid">
-    <article class="card"><h3>Florists</h3><p>Timed delivery windows, fragile handling notes, substitutions, customer tracking, and completion records.</p></article><article class="card"><h3>Licensed cannabis delivery</h3><p>Driver assignment, delivery notes, age-verification reminders, route history, and status records for compliant operators.</p></article><article class="card"><h3>Pharmacies</h3><p>Priority drops, recurring routes, signature notes, sensitive-order handling, and audit-friendly delivery history.</p></article><article class="card"><h3>Restaurants</h3><p>Choose in-house delivery or courier coverage order by order while keeping customer and completion records together.</p></article><article class="card"><h3>Retailers</h3><p>Connect online orders, schedule same-day delivery, and keep the customer experience under your own brand.</p></article><article class="card"><h3>Courier companies</h3><p>Dispatcher visibility, route optimization, driver app workflows, mileage logs, payroll estimates, and delivery records.</p></article>
-  </section>
-  <section class="band split">
-    <div>
-      <h2>Control the work from order intake to completed proof</h2>
-      <p>Bring in orders from the tools you already use, then know who is driving, what route they are taking, whether the customer was updated, what proof was captured, and what the route cost to run.</p>
-    </div>
-    <div class="steps">
-      <div class="step"><span>1</span><div><h3>Connect your orders</h3><p>Use any website, store, POS, webhook, or API to bring delivery details into Rivo.</p></div></div>
-      <div class="step"><span>2</span><div><h3>Coordinate delivery capacity</h3><p>Assign work to your drivers, request a saved courier partner, optimize in-house route groups, and keep delivery status visible.</p></div></div>
-      <div class="step"><span>3</span><div><h3>Close the loop</h3><p>Capture proof, track mileage, estimate payroll, and keep delivery history ready for review.</p></div></div>
-    </div>
-  </section>
+<main id="main">
+<section class="sectors-hero">
+<p class="category"><span class="signal-dot"></span> RIVO FOR YOUR BUSINESS</p>
+<h1>For businesses<br><span>on the move.</span></h1>
+<div class="sectors-hero-bottom"><p>Whether deliveries are your business or part of it, bring your orders, drivers, trip records and mileage into one workspace.</p><a href="#business-workflows">Explore the workflows <span aria-hidden="true">↘</span></a></div>
+</section>
+<section class="business-workflows" id="business-workflows" aria-labelledby="business-workflows-title">
+<div class="workflow-intro"><p class="category">START WITH THE WORK</p><h2 id="business-workflows-title">What does your<br>day need to do?</h2><p>For shops, suppliers, independent drivers and teams that spend their day on the road.</p><a class="workflow-demo-link" href="/demo">Explore the interactive demo <span aria-hidden="true">↗</span></a></div>
+<div class="workflow-list">
+<article><span class="workflow-number">01</span><div><h3>Get deliveries out the door.</h3><p>Bring in orders, arrange stops, assign drivers and keep delivery instructions with the work.</p><span class="workflow-example">Customer orders · Parts runs · Business drop-offs</span></div></article>
+<article><span class="workflow-number">02</span><div><h3>Keep your team connected.</h3><p>Give dispatch a shared view of the day and drivers the details for their next stop. Retain delivery outcomes and proof.</p><span class="workflow-example">Your own drivers · Local delivery teams · Courier operations</span></div></article>
+<article><span class="workflow-number">03</span><div><h3>Keep a record of the miles.</h3><p>Review recorded trips, classify business and personal mileage, and prepare mileage reports.</p><span class="workflow-example">Independent drivers · Owner-operators · Business driving</span></div></article>
+</div></section>
+<div class="business-examples-heading"><p class="category">A FEW WAYS TO USE RIVO</p><h2>Your workflow, in context.</h2><p>Explore these examples as a starting point. Your business doesn’t need to fit a category.</p></div>
+<section class="sector-explorer" id="industry-explorer" aria-label="Explore delivery workflows">
+<div class="sector-tabs" aria-label="Explore business examples"><a class="sector-tab" id="tab-business" href="#panel-business" style="--sector-accent:#78adff"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="7" width="18" height="15" rx="2"/><path d="M8 7V4h8v3M3 13h18M10 13v3h4v-3"/></svg><span>Business deliveries</span><span class="tab-arrow" aria-hidden="true">↗</span></a><a class="sector-tab" id="tab-florists" href="#panel-florists" style="--sector-accent:#78adff"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11c-8-7-10 2-3 3-7 5 1 10 3 3 2 7 10 2 3-3 7-1 5-10-3-3Z"/><path d="M12 17v5m0-3 5-2M12 8c-5-7 5-7 0 0Z"/></svg><span>Florists & gifts</span><span class="tab-arrow" aria-hidden="true">↗</span></a><a class="sector-tab" id="tab-retail" href="#panel-retail" style="--sector-accent:#78adff"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 8-4 8 4v11l-8 4-8-4Z"/><path d="m4 7 8 4 8-4M12 11v11M8 5l8 4"/></svg><span>Local retail</span><span class="tab-arrow" aria-hidden="true">↗</span></a><a class="sector-tab" id="tab-food-delivery" href="#panel-food-delivery" style="--sector-accent:#f3bd72"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15h18M5 15a7 7 0 0 1 14 0M4 19h16M12 5V3"/></svg><span>Prepared food</span><span class="tab-arrow" aria-hidden="true">↗</span></a><a class="sector-tab" id="tab-courier-teams" href="#panel-courier-teams" style="--sector-accent:#78ddaf"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 6h9a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h9"/></svg><span>Courier teams</span><span class="tab-arrow" aria-hidden="true">↗</span></a></div><div class="sector-panels"><section class="sector-panel" id="panel-business" aria-labelledby="tab-business" style="--sector-accent:#78adff">
+<div class="sector-story"><p class="sector-index">01 / BUSINESS DELIVERIES</p><h2>Your work.<br>A clear next stop.</h2><p class="sector-description">Coordinate customer deliveries, supplier runs or business drop-offs with the same core workflow: an order, a driver, a destination and a record of the trip.</p><ul><li><span aria-hidden="true">✓</span>Manual orders or configured store connections</li><li><span aria-hidden="true">✓</span>Driver trips and recorded mileage</li><li><span aria-hidden="true">✓</span>Destination-specific customer tracking</li></ul><a class="sector-detail-link" href="/demo">See Rivo in action<span aria-hidden="true">↗</span></a></div>
+<div class="sector-product"><div class="sector-window-bar"><span><span class="mini-rivo"><img src="/assets/rivo-pinwheel.svg?v=61" alt="" width="16" height="16"></span> Delivery workspace</span><span class="sample-label">ILLUSTRATIVE WORKFLOW</span></div>
+<div class="sector-ui"><div class="sector-ui-heading"><span>Business deliveries</span><span class="ui-dot">Trip completed</span></div>
+<div class="sector-order"><div class="order-symbol"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 8-4 8 4v11l-8 4-8-4Z"/><path d="m4 7 8 4 8-4M12 11v11M8 5l8 4"/></svg></div><div><span class="order-number">RV-2081</span><h3>Parts & supplies delivery</h3></div><span class="order-menu" aria-hidden="true">···</span></div>
+<div class="sector-fields"><div><span class="field-label">DELIVERY WINDOW</span><strong>Today, 3–5 PM</strong></div><div><span class="field-label">DRIVER</span><strong><span class="driver-avatar">JL</span> Jordan L.</strong></div></div>
+<div class="sector-note"><span class="field-label">DELIVERY INSTRUCTIONS</span><p>Leave with concierge at the main entrance.</p></div>
+<div class="sector-trip"><div><span class="field-label">MILEAGE</span><strong>8.2 <small>km</small></strong></div><div><span class="field-label">TRIP DURATION</span><strong>24 <small>min</small></strong></div><span class="trip-complete">✓ Trip recorded</span></div>
+<div class="sector-flow" aria-label="Example workflow"><div><span class="flow-node">1</span><p>Order prepared</p></div><div><span class="flow-node">2</span><p>Driver assigned</p></div><div><span class="flow-node">3</span><p>Proof retained</p></div></div>
+</div><div class="sector-window-footer"><span class="small-signal"></span>From the first stop to the trip record<span class="sample-data">Sample data</span></div></div>
+</section><section class="sector-panel" id="panel-florists" aria-labelledby="tab-florists" style="--sector-accent:#78adff">
+<div class="sector-story"><p class="sector-index">02 / FLOWER DELIVERY</p><h2>For the moments<br>that need to arrive.</h2><p class="sector-description">Keep the occasion, the delivery window and the small details together. Give every bouquet a clear path from your shop to their door.</p><ul><li><span aria-hidden="true">✓</span>Occasion dates & delivery windows</li><li><span aria-hidden="true">✓</span>Recipient and doorstep instructions</li><li><span aria-hidden="true">✓</span>Trip history, mileage & proof</li></ul><a class="sector-detail-link" href="/florists">Explore florists & gifts<span aria-hidden="true">↗</span></a></div>
+<div class="sector-product"><div class="sector-window-bar"><span><span class="mini-rivo"><img src="/assets/rivo-pinwheel.svg?v=61" alt="" width="16" height="16"></span> Delivery workspace</span><span class="sample-label">ILLUSTRATIVE WORKFLOW</span></div>
+<div class="sector-ui"><div class="sector-ui-heading"><span>Flower delivery</span><span class="ui-dot">Trip completed</span></div>
+<div class="sector-order"><div class="order-symbol"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11c-8-7-10 2-3 3-7 5 1 10 3 3 2 7 10 2 3-3 7-1 5-10-3-3Z"/><path d="M12 17v5m0-3 5-2M12 8c-5-7 5-7 0 0Z"/></svg></div><div><span class="order-number">RV-1042</span><h3>Anniversary bouquet</h3></div><span class="order-menu" aria-hidden="true">···</span></div>
+<div class="sector-fields"><div><span class="field-label">DELIVERY WINDOW</span><strong>Today, 2–4 PM</strong></div><div><span class="field-label">DRIVER</span><strong><span class="driver-avatar">JL</span> Jordan L.</strong></div></div>
+<div class="sector-note"><span class="field-label">DELIVERY INSTRUCTIONS</span><p>Call recipient on arrival. Keep upright.</p></div>
+<div class="sector-trip"><div><span class="field-label">MILEAGE</span><strong>6.4 <small>km</small></strong></div><div><span class="field-label">TRIP DURATION</span><strong>18 <small>min</small></strong></div><span class="trip-complete">✓ Trip recorded</span></div>
+<div class="sector-flow" aria-label="Example workflow"><div><span class="flow-node">1</span><p>Bouquet ready</p></div><div><span class="flow-node">2</span><p>Assigned to driver</p></div><div><span class="flow-node">3</span><p>Delivery recorded</p></div></div>
+</div><div class="sector-window-footer"><span class="small-signal"></span>Occasion-sensitive delivery<span class="sample-data">Sample data</span></div></div>
+</section><section class="sector-panel" id="panel-retail" aria-labelledby="tab-retail" style="--sector-accent:#78adff">
+<div class="sector-story"><p class="sector-index">03 / RETAIL DELIVERY</p><h2>Your checkout.<br>Their doorstep.</h2><p class="sector-description">Bring local delivery orders into one dispatch workflow. Keep your team aligned as new purchases arrive throughout the day.</p><ul><li><span aria-hidden="true">✓</span>Manual orders or configured store connections</li><li><span aria-hidden="true">✓</span>Driver trips and recorded mileage</li><li><span aria-hidden="true">✓</span>Destination-specific customer tracking</li></ul><a class="sector-detail-link" href="/retail">Explore local retail<span aria-hidden="true">↗</span></a></div>
+<div class="sector-product"><div class="sector-window-bar"><span><span class="mini-rivo"><img src="/assets/rivo-pinwheel.svg?v=61" alt="" width="16" height="16"></span> Delivery workspace</span><span class="sample-label">ILLUSTRATIVE WORKFLOW</span></div>
+<div class="sector-ui"><div class="sector-ui-heading"><span>Retail delivery</span><span class="ui-dot">Trip completed</span></div>
+<div class="sector-order"><div class="order-symbol"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 7 8-4 8 4v11l-8 4-8-4Z"/><path d="m4 7 8 4 8-4M12 11v11M8 5l8 4"/></svg></div><div><span class="order-number">RV-2081</span><h3>Home essentials</h3></div><span class="order-menu" aria-hidden="true">···</span></div>
+<div class="sector-fields"><div><span class="field-label">DELIVERY WINDOW</span><strong>Today, 3–5 PM</strong></div><div><span class="field-label">DRIVER</span><strong><span class="driver-avatar">JL</span> Jordan L.</strong></div></div>
+<div class="sector-note"><span class="field-label">DELIVERY INSTRUCTIONS</span><p>Leave with concierge at the main entrance.</p></div>
+<div class="sector-trip"><div><span class="field-label">MILEAGE</span><strong>8.2 <small>km</small></strong></div><div><span class="field-label">TRIP DURATION</span><strong>24 <small>min</small></strong></div><span class="trip-complete">✓ Trip recorded</span></div>
+<div class="sector-flow" aria-label="Example workflow"><div><span class="flow-node">1</span><p>Order prepared</p></div><div><span class="flow-node">2</span><p>Driver assigned</p></div><div><span class="flow-node">3</span><p>Proof retained</p></div></div>
+</div><div class="sector-window-footer"><span class="small-signal"></span>From store to doorstep<span class="sample-data">Sample data</span></div></div>
+</section><section class="sector-panel" id="panel-food-delivery" aria-labelledby="tab-food-delivery" style="--sector-accent:#f3bd72">
+<div class="sector-story"><p class="sector-index">04 / PREPARED FOOD DELIVERY</p><h2>Every order.<br>A clear delivery window.</h2><p class="sector-description">Coordinate catering, meal prep and specialty food deliveries with your own drivers. Put timing and handoff instructions where the team can find them.</p><ul><li><span aria-hidden="true">✓</span>Delivery windows for scheduled orders</li><li><span aria-hidden="true">✓</span>Driver assignments in one workspace</li><li><span aria-hidden="true">✓</span>Trip records, mileage and handoff notes</li></ul><a class="sector-detail-link" href="/food-delivery">Explore prepared food<span aria-hidden="true">↗</span></a></div>
+<div class="sector-product"><div class="sector-window-bar"><span><span class="mini-rivo"><img src="/assets/rivo-pinwheel.svg?v=61" alt="" width="16" height="16"></span> Delivery workspace</span><span class="sample-label">ILLUSTRATIVE WORKFLOW</span></div>
+<div class="sector-ui"><div class="sector-ui-heading"><span>Prepared food delivery</span><span class="ui-dot">Trip completed</span></div>
+<div class="sector-order"><div class="order-symbol"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15h18M5 15a7 7 0 0 1 14 0M4 19h16M12 5V3"/></svg></div><div><span class="order-number">RV-3064</span><h3>Team lunch order</h3></div><span class="order-menu" aria-hidden="true">···</span></div>
+<div class="sector-fields"><div><span class="field-label">DELIVERY WINDOW</span><strong>Today, 11:30 AM–12 PM</strong></div><div><span class="field-label">DRIVER</span><strong><span class="driver-avatar">JL</span> Jordan L.</strong></div></div>
+<div class="sector-note"><span class="field-label">DELIVERY INSTRUCTIONS</span><p>Use the side entrance. Call the office on arrival.</p></div>
+<div class="sector-trip"><div><span class="field-label">MILEAGE</span><strong>4.7 <small>km</small></strong></div><div><span class="field-label">TRIP DURATION</span><strong>16 <small>min</small></strong></div><span class="trip-complete">✓ Trip recorded</span></div>
+<div class="sector-flow" aria-label="Example workflow"><div><span class="flow-node">1</span><p>Order ready</p></div><div><span class="flow-node">2</span><p>Out for delivery</p></div><div><span class="flow-node">3</span><p>Handoff recorded</p></div></div>
+</div><div class="sector-window-footer"><span class="small-signal"></span>Timing matters at every stop<span class="sample-data">Sample data</span></div></div>
+</section><section class="sector-panel" id="panel-courier-teams" aria-labelledby="tab-courier-teams" style="--sector-accent:#78ddaf">
+<div class="sector-story"><p class="sector-index">05 / COURIER DELIVERY</p><h2>A changing day.<br>A connected team.</h2><p class="sector-description">Give dispatchers a shared view of queued and assigned work. Keep drivers focused on their next stop, with delivery outcomes coming back to the same workspace.</p><ul><li><span aria-hidden="true">✓</span>Queued work and driver assignments</li><li><span aria-hidden="true">✓</span>Stop details and delivery instructions</li><li><span aria-hidden="true">✓</span>Trip history and recorded mileage</li></ul><a class="sector-detail-link" href="/courier-teams">Explore courier teams<span aria-hidden="true">↗</span></a></div>
+<div class="sector-product"><div class="sector-window-bar"><span><span class="mini-rivo"><img src="/assets/rivo-pinwheel.svg?v=61" alt="" width="16" height="16"></span> Delivery workspace</span><span class="sample-label">ILLUSTRATIVE WORKFLOW</span></div>
+<div class="sector-ui"><div class="sector-ui-heading"><span>Courier delivery</span><span class="ui-dot">Trip completed</span></div>
+<div class="sector-order"><div class="order-symbol"><svg viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 6h9a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h9"/></svg></div><div><span class="order-number">RV-4016</span><h3>Local parcel collection</h3></div><span class="order-menu" aria-hidden="true">···</span></div>
+<div class="sector-fields"><div><span class="field-label">DELIVERY WINDOW</span><strong>Today, 1–3 PM</strong></div><div><span class="field-label">DRIVER</span><strong><span class="driver-avatar">JL</span> Jordan L.</strong></div></div>
+<div class="sector-note"><span class="field-label">DELIVERY INSTRUCTIONS</span><p>Collect from reception. Deliver to loading bay B.</p></div>
+<div class="sector-trip"><div><span class="field-label">MILEAGE</span><strong>12.6 <small>km</small></strong></div><div><span class="field-label">TRIP DURATION</span><strong>38 <small>min</small></strong></div><span class="trip-complete">✓ Trip recorded</span></div>
+<div class="sector-flow" aria-label="Example workflow"><div><span class="flow-node">1</span><p>Job queued</p></div><div><span class="flow-node">2</span><p>Assigned to driver</p></div><div><span class="flow-node">3</span><p>Delivery confirmed</p></div></div>
+</div><div class="sector-window-footer"><span class="small-signal"></span>Clarity from dispatch to delivery<span class="sample-data">Sample data</span></div></div>
+</section></div></section>
+<section class="sector-closing"><div><p class="category">LET’S TALK ABOUT YOUR DAY.</p><h2>Don’t see your<br>business here?</h2><p>7 days free. No credit card required.</p></div><div class="sector-closing-actions"><a class="hero-start" href="https://app.floraljet.llc/signup">Start Free <span aria-hidden="true">↗</span></a><a class="sector-talk" href="/contact">Talk through your workflow <span aria-hidden="true">→</span></a></div></section>
 </main>
-  <footer>
-  <div class="wrap footer-inner">
-    <div>Rivo connects any website, store, POS, or API to one workspace for dispatching orders, coordinating in-house drivers and courier partners, tracking delivery progress, capturing proof, and keeping delivery records.</div>
-    <div class="footer-links">
-      <a href="demo.html">Demo</a>
-      <a href="pricing.html">Pricing</a>
-      <a href="industries.html">Industries</a>
-      <a href="terms.html">Terms</a>
-      <a href="privacy.html">Privacy</a>
-      <a href="contact.html">Contact</a>
-    </div>
-  </div>
+<footer>
+<a class="wordmark" href="/">
+<img class="brand-mark" src="/assets/rivo-pinwheel.svg?v=61" alt="" width="32" height="32">Rivo</a>
+<p>Deliveries, drivers and mileage. Connected.</p>
+<div>
+<a href="/industries">Industries</a>
+<a href="/privacy">Privacy</a>
+<a href="/terms">Terms</a>
+</div>
 </footer>
 </body>
 </html>

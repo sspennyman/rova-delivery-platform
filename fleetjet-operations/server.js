@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import worker from "./worker/index.js";
+import { localD1 } from "./scripts/local-d1.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,7 +164,7 @@ async function sendWebResponse(response, nodeResponse, method) {
 }
 
 loadEnvFile();
-const database = new LocalD1();
+const database = process.env.RIVO_LOCAL_SQLITE ? localD1(process.env.RIVO_LOCAL_SQLITE) : new LocalD1();
 const env = {
   ...process.env,
   DB: database,

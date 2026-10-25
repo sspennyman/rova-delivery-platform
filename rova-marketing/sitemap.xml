@@ -1,24 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://floraljet.llc/</loc>
+    <loc>https://floraljet.llc/</loc><lastmod>2026-10-24</lastmod>
   </url>
   <url>
-    <loc>https://floraljet.llc/demo.html</loc>
+    <loc>https://floraljet.llc/demo</loc><lastmod>2026-10-24</lastmod>
   </url>
   <url>
-    <loc>https://floraljet.llc/pricing.html</loc>
+    <loc>https://floraljet.llc/pricing</loc><lastmod>2026-10-24</lastmod>
   </url>
   <url>
-    <loc>https://floraljet.llc/industries.html</loc>
+    <loc>https://floraljet.llc/industries</loc><lastmod>2026-10-24</lastmod>
   </url>
   <url>
-    <loc>https://floraljet.llc/contact.html</loc>
+    <loc>https://floraljet.llc/contact</loc><lastmod>2026-10-24</lastmod>
   </url>
   <url>
-    <loc>https://floraljet.llc/privacy.html</loc>
+    <loc>https://floraljet.llc/privacy</loc><lastmod>2026-10-24</lastmod>
   </url>
   <url>
-    <loc>https://floraljet.llc/terms.html</loc>
+    <loc>https://floraljet.llc/terms</loc><lastmod>2026-10-24</lastmod>
   </url>
+<url><loc>https://floraljet.llc/florists</loc><lastmod>2026-10-24</lastmod></url>
+<url><loc>https://floraljet.llc/retail</loc><lastmod>2026-10-24</lastmod></url>
+<url><loc>https://floraljet.llc/food-delivery</loc><lastmod>2026-10-24</lastmod></url>
+<url><loc>https://floraljet.llc/courier-teams</loc><lastmod>2026-10-24</lastmod></url>
 </urlset>

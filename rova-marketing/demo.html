@@ -1,13 +1,14 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script src="/assets/appearance.js?v=98"></script>
   <meta charset="utf-8">
   <script>if(["floral-jet.spennyman.chatgpt.site","www.floraljet.llc"].includes(location.hostname))location.replace(`https://floraljet.llc${location.pathname}${location.search}${location.hash}`)</script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live delivery board demo | Rivo</title>
   <meta name="description" content="Try the Rivo operations demo for local delivery businesses, with driver assignment, route optimization, customer tracking, mileage, payroll estimates, and delivery records.">
-  <link rel="canonical" href="https://floraljet.llc/demo.html">
-  <link rel="icon" href="assets/rova-mark.svg" type="image/svg+xml">
+  <link rel="canonical" href="https://floraljet.llc/demo">
+  <link rel="icon" href="/assets/favicon.svg?v=51" type="image/svg+xml">
   <style>
   :root {
     color-scheme: light;
@@ -1084,19 +1085,35 @@
   }
 </style>
   <link rel="stylesheet" href="assets/rova-secondary.css">
+  <link rel="stylesheet" href="/assets/rivo-full-demo.css?v=61">
+<link rel="stylesheet" href="/assets/rivo-unified.css?v=61">
+<link rel="stylesheet" href="/assets/appearance.css?v=61">
+<link rel="stylesheet" href="/assets/rivo-site-polish.css?v=61">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Rivo">
+<meta property="og:locale" content="en_CA">
+<meta property="og:title" content="Live delivery board demo | Rivo">
+<meta property="og:description" content="Try the Rivo operations demo for local delivery businesses, with driver assignment, route optimization, customer tracking, mileage, payroll estimates, and delivery records.">
+<meta property="og:url" content="https://floraljet.llc/demo">
+<meta property="og:image" content="https://floraljet.llc/assets/rivo-social-blue.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Rivo — dispatch, routes and business mileage">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "Organization", "@id": "https://floraljet.llc/#organization", "name": "Rivo", "url": "https://floraljet.llc/", "logo": "https://floraljet.llc/assets/rivo-pinwheel.svg", "email": "rivocanada@gmail.com"}, {"@type": "WebSite", "@id": "https://floraljet.llc/#website", "url": "https://floraljet.llc/", "name": "Rivo", "publisher": {"@id": "https://floraljet.llc/#organization"}, "inLanguage": "en-CA"}, {"@type": "WebPage", "@id": "https://floraljet.llc/demo#webpage", "url": "https://floraljet.llc/demo", "name": "Live delivery board demo | Rivo", "description": "Try the Rivo operations demo for local delivery businesses, with driver assignment, route optimization, customer tracking, mileage, payroll estimates, and delivery records.", "isPartOf": {"@id": "https://floraljet.llc/#website"}}]}</script>
 </head>
-<body>
+<body class="rivo-full-demo">
   <a class="skip-link" href="#main">Skip to content</a>
   <nav class="nav">
   <div class="wrap nav-inner">
-    <a class="brand" href="index.html"><span class="brand-logo" aria-hidden="true"><img src="assets/rova-mark.svg" alt=""></span><span>Rivo</span></a>
+    <a class="brand" href="index.html"><span class="brand-logo" aria-hidden="true"><img src="/assets/rivo-pinwheel.svg?v=61" alt=""></span><span>Rivo</span></a>
     <div class="links">
-      <a href="index.html#platform">Platform</a>
+      <a href="/#product">Platform</a>
       <a href="industries.html">Industries</a>
       <a href="pricing.html">Pricing</a>
       <a href="contact.html">Contact</a>
       <a class="login-link" href="https://app.floraljet.llc/">Log in</a>
-      <a class="nav-cta" href="contact.html">Book Onboarding</a>
+      <a class="nav-cta" href="https://app.floraljet.llc/signup">Start Free</a>
     </div>
   </div>
 </nav>
@@ -1108,33 +1125,38 @@
   </div>
 </header>
 <main class="wrap" id="main">
-  <section class="demo-shell">
-    <aside class="demo-panel">
-      <h2>Add delivery order</h2>
+  <section class="demo-app-frame" aria-label="Interactive sample Rivo workspace">
+    <aside class="demo-app-sidebar"><a class="brand" href="/"><img src="/assets/rivo-pinwheel.svg?v=61" alt="" width="30" height="30">Rivo</a><p>Sample workspace · Live dispatch</p><nav aria-label="Sample workspace navigation"><span class="active" aria-current="page">Today</span><span>Team</span><a href="/?tour=mileage#product-tour">My Mileage</a><span>Reports</span><span>More +</span></nav><small>Interactive demonstration.<br>All records stay in your browser.</small></aside>
+    <div class="demo-app-main"><div class="demo-today-head"><h2>Today</h2><button class="button" id="openDelivery" type="button">New delivery</button></div>
+      <div class="demo-workspace-metrics"><div><span>Waiting</span><strong id="demoWaiting">0</strong></div><div><span>On the road</span><strong id="demoRoad">0</strong></div><div><span>Delivered today</span><strong id="demoDelivered">0</strong></div><div><span>Needs attention</span><strong>0</strong></div></div>
+      <div class="demo-workspace-tabs"><span class="active">Orders</span><span>Active</span><span>Pickups &amp; other</span><span>History</span><a href="/?tour=mileage#product-tour">My Mileage ↗</a></div>
+      <div class="demo-shell">    <section class="demo-panel">
+      <div class="section-head" style="margin-top:0">
+        <div><p class="eyebrow">Sample workspace</p><h2>Orders to dispatch</h2></div>
+        <button class="button secondary" id="resetDemo" type="button">Reset Demo</button>
+      </div>
+      <div class="orders" id="orders"></div>
+
+    </section><aside class="demo-panel demo-route"><h2>Route preview</h2><p class="form-note">Select orders to preview their route.</p>      <div class="route-box" id="routeBox">
+        <strong>Sample route & mileage</strong>
+        <p class="form-note" id="routeText">Select or add orders to calculate route mileage and driver pay.</p>
+        <a class="button" id="mapLink" href="https://maps.google.com" target="_blank" rel="noopener">Open route in Maps</a>
+      </div><button class="button secondary" id="showRouteTools" type="button">Route tools</button></aside></div>
+    </div>
+  </section>
+  <dialog class="demo-delivery-dialog" id="deliveryDialog">    <aside class="demo-panel">
+      <div class="demo-dialog-head"><h2>New delivery</h2><button class="button subtle" type="button" id="closeDelivery">Close</button></div>
       <div class="field"><label for="customer">Customer</label><input id="customer" value="New Customer"></div>
       <div class="field"><label for="type">Delivery priority</label><select id="type"><option>Standard</option><option>Timed</option><option>Same day</option></select></div>
       <div class="field"><label for="address">Delivery address</label><input id="address" value="100 Queen St W, Toronto"></div>
       <div class="field"><label for="window">Window</label><input id="window" value="3:00-4:00"></div>
-      <div class="field"><label for="driver">Driver</label><select id="driver"><option>AI auto-assign</option><option>Ava</option><option>Milo</option><option>Noah</option><option>Unassigned</option></select></div>
+      <div class="field"><label for="driver">Driver</label><select id="driver"><option>Auto-assign</option><option>Ava</option><option>Milo</option><option>Noah</option><option>Unassigned</option></select></div>
       <div class="field"><label for="notes">Notes</label><textarea id="notes">Share the live tracking link. Record completion details when delivered.</textarea></div>
       <button class="button full" id="addOrder" type="button">Add delivery</button>
-      <button class="button secondary full" id="autoAssign" type="button">AI Assign + Optimize</button>
+      <button class="button secondary full" id="autoAssign" type="button">Assign + Optimize</button>
       <button class="button subtle full" id="postShift" type="button">Check capacity</button>
       <p class="form-note">This sample stays in your browser and shows the in-house workflow. A live Rivo workspace can pull orders from any website, store, POS, or API and hand selected orders to saved courier partners.</p>
-    </aside>
-    <section class="demo-panel">
-      <div class="section-head" style="margin-top:0">
-        <div><p class="eyebrow">Northstar's team</p><h2>Today's deliveries</h2></div>
-        <button class="button secondary" id="resetDemo" type="button">Reset Demo</button>
-      </div>
-      <div class="orders" id="orders"></div>
-      <div class="route-box" id="routeBox">
-        <strong>AI route + payroll preview</strong>
-        <p class="form-note" id="routeText">Select or add orders to calculate route mileage and driver pay.</p>
-        <a class="button" id="mapLink" href="https://maps.google.com" target="_blank" rel="noopener">Open Optimized Route</a>
-      </div>
-    </section>
-  </section>
+    </aside></dialog>
 </main>
 <script>
 (() => {
@@ -1177,25 +1199,29 @@
     return `Hi ${order.customer}, your delivery from ${companyName} is ${order.status.toLowerCase()}. Window: ${order.window}. You will receive proof when it is complete.`;
   }
 
+  const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   function render() {
+    $("demoWaiting").textContent=orders.filter(order=>!["Out for delivery","Delivered"].includes(order.status)).length;
+    $("demoRoad").textContent=orders.filter(order=>order.status==="Out for delivery").length;
+    $("demoDelivered").textContent=orders.filter(order=>order.status==="Delivered").length;
     $("orders").innerHTML = orders.map((order) => `
       <article class="order-card ${order.id === selected ? "selected" : ""}">
         <div class="order-head">
-          <div><strong>${order.customer}</strong><div class="form-note">${order.address}</div></div>
-          <span class="mini-tag">${order.status}</span>
+          <div><strong>${escape(order.customer)}</strong><div class="form-note">${escape(order.address)}</div></div>
+          <span class="mini-tag">${escape(order.status)}</span>
         </div>
         <div class="order-meta">
-          <span>${order.id}</span>
-          <span>${order.type}</span>
-          <span>${order.window}</span>
-          <span>Driver: ${order.driver}</span>
-          <span>${order.priority}</span>
+          <span>${escape(order.id)}</span>
+          <span>${escape(order.type)}</span>
+          <span>${escape(order.window)}</span>
+          <span>Driver: ${escape(order.driver)}</span>
+          <span>${escape(order.priority)}</span>
         </div>
-        <p class="form-note">${order.notes}</p>
+        <p class="form-note">${escape(order.notes)}</p>
         <div class="actions">
-          <button class="button subtle" type="button" data-select="${order.id}">Select</button>
-          <button class="button secondary" type="button" data-status="${order.id}">Next Status</button>
-          <button class="button" type="button" data-text="${order.id}">Copy update</button>
+          <button class="button subtle" type="button" data-select="${escape(order.id)}">Select</button>
+          <button class="button secondary" type="button" data-status="${escape(order.id)}">Next Status</button>
+          <button class="button" type="button" data-text="${escape(order.id)}">Copy update</button>
         </div>
       </article>
     `).join("");
@@ -1203,7 +1229,7 @@
     const active = orders.filter((order) => order.status !== "Delivered");
     const kilometres = Math.max(5.2, active.length * 3.9).toFixed(1);
     const payroll = Math.round(active.length * 7 + Number(kilometres) * 0.45);
-    $("routeText").textContent = `${active.length} active stops optimized. Estimated distance: ${kilometres} km. Driver pay estimate: $${payroll}.`;
+    $("routeText").textContent = `${active.length} sample stops. Illustrative distance: ${kilometres} km. Example driver pay: $${payroll}.`;
     document.querySelectorAll("[data-select]").forEach((button) => button.addEventListener("click", () => {
       selected = button.dataset.select;
       render();
@@ -1235,12 +1261,13 @@
       type: $("type").value,
       address: $("address").value || "Toronto",
       window: $("window").value || "Today",
-      driver: $("driver").value === "AI auto-assign" ? "Unassigned" : $("driver").value,
+      driver: $("driver").value === "Auto-assign" ? "Unassigned" : $("driver").value,
       status: "Ready",
       priority: $("type").value,
       notes: $("notes").value || "No notes."
     };
     draft.driver = draft.driver === "Unassigned" ? recommendDriver(draft, orders.length) : draft.driver;
+    $("deliveryDialog").close();
     orders.unshift(draft);
     selected = id;
     save();
@@ -1251,7 +1278,7 @@
     orders = orders.map((order, index) => ({
       ...order,
       driver: recommendDriver(order, index),
-      priority: order.status === "Delivered" ? order.priority : "AI routed"
+      priority: order.status === "Delivered" ? order.priority : "Routed"
     }));
     save();
     render();
@@ -1269,6 +1296,10 @@
     render();
   });
 
+  $("openDelivery").addEventListener("click",()=>$("deliveryDialog").showModal());
+  $("closeDelivery").addEventListener("click",()=>$("deliveryDialog").close());
+  $("deliveryDialog").addEventListener("close",()=>$("openDelivery").focus());
+  $("showRouteTools").addEventListener("click",()=>$("deliveryDialog").showModal());
   render();
 })();
 </script>

@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import worker from '../worker/index.js';
+import {localD1} from './local-d1.mjs';
+const env={DB:localD1()};
+async function call(path,body,token,extra={}) {
+ const r=await worker.fetch(new Request('https://app.floraljet.llc'+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...extra},...(body?{body:JSON.stringify(body)}:{})}),env);
+ return {status:r.status,...await r.json()};
+}
+const register=email=>call('/api/auth/register',{email,password:'fixture-password-123',name:'Fixture owner',companyName:'Privacy fixture',timeZone:'America/Toronto'});
+const a=await register('privacy-a@example.test'),b=await register('privacy-b@example.test');
+assert.equal(a.status,201);assert.equal(b.status,201);
+const path='/api/account/deletion-request';
+assert.equal((await call(path)).status,401);
+assert.equal((await call(path,null,a.session.token)).request,null);
+assert.equal((await call(path,{password:'wrong',confirmation:'DELETE'},a.session.token)).status,401);
+assert.equal((await call(path,{password:'fixture-password-123',confirmation:'delete'},a.session.token)).status,400);
+assert.equal((await call(path,{password:'fixture-password-123',confirmation:'DELETE'},a.session.token,{Origin:'https://other.example.test'})).status,403);
+const request=await call(path,{password:'fixture-password-123',confirmation:'DELETE',driverId:'someone-else',subjectKey:'another-account'},a.session.token);
+assert.equal(request.status,201);assert.equal(request.request.status,'pending');
+assert.deepEqual(Object.keys(request.request).sort(),['id','requestedAt','status']);
+assert.equal((await call(path,null,b.session.token)).request,null,'other tenants cannot see requests');
+assert.equal((await call(path,{password:'fixture-password-123',confirmation:'DELETE'},a.session.token)).request.id,request.request.id,'replay does not duplicate requests');
+const invite=await call('/api/drivers',{name:'Privacy driver',email:'privacy-driver@example.test',vehicle:'Fixture'},a.session.token);
+const accepted=await call('/api/auth/invite/accept',{token:new URL(invite.inviteUrl).searchParams.get('invite'),password:'driver-password-123'});
+assert.equal(accepted.status,200);
+assert.equal((await call(path,null,accepted.session.token)).request,null,'driver cannot see owner request');
+assert.equal((await call(path,{password:'fixture-password-123',confirmation:'DELETE'},accepted.session.token)).status,401,'owner password cannot request driver deletion');
+const driverRequest=await call(path,{password:'driver-password-123',confirmation:'DELETE',subjectKey:a.session.accountKey},accepted.session.token);
+assert.equal(driverRequest.status,201);assert.notEqual(driverRequest.request.id,request.request.id);
+const row=await env.DB.prepare('SELECT payload_json FROM delivery_tracker_state_v1 WHERE state_key=?').bind(a.snapshot.company.workspaceKey).first();
+const db=JSON.parse(row.payload_json);
+assert.equal(db.accountDeletionRequests.length,2);
+assert.equal(db.accountDeletionRequests.find(x=>x.id===driverRequest.request.id).subjectKey,'driver:'+accepted.session.driverId);
+assert.ok(db.accountDeletionRequests.every(x=>!('password' in x)),'requests never persist passwords');
+assert.equal((await call('/api/me',null,accepted.session.token)).status,200,'request does not masquerade as deletion/deactivation');
+for(let i=0;i<8;i++) await call(path,{password:'wrong',confirmation:'DELETE'},accepted.session.token);
+assert.equal((await call(path,{password:'driver-password-123',confirmation:'DELETE'},accepted.session.token)).status,429);
+console.log('Deletion initiation passed: durable pending requests, reauthentication, rate limiting, idempotency, tenant/actor isolation, no password persistence, cross-origin rejection. Manual fulfillment remains a launch gate.');

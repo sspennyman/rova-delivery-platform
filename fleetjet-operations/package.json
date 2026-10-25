@@ -4,6 +4,12 @@
   "private": true,
   "description": "Real-time delivery driver tracking with customer share links and weekly trip approval logs.",
   "type": "module",
+  "dependencies": {
+    "@block65/webcrypto-web-push": "2.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
@@ -11,6 +17,6 @@
     "validate": "node scripts/validate-site.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   }
 }

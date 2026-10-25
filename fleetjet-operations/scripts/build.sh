@@ -7,7 +7,8 @@ cd "$ROOT"
 rm -rf dist
 mkdir -p dist/server dist/client dist/.openai
 
-cp worker/index.js dist/server/index.js
+cp worker/*.js dist/server/
+node scripts/bundle-worker.mjs
 cp -R public/. dist/client/
 cp .openai/hosting.json dist/.openai/hosting.json
 if [[ -d .openai/drizzle ]]; then

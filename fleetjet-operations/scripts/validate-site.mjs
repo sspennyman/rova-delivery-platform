@@ -9,6 +9,7 @@ const requiredFiles = [
   "dist/client/index.html",
   "dist/client/operations.html",
   "dist/client/app.js",
+  "dist/client/trip-maps.js",
   "dist/client/canonical-host.js",
   "dist/client/styles.css",
   "dist/client/manifest.webmanifest",
@@ -29,11 +30,11 @@ for (const relativePath of requiredFiles) {
 const appHtml = fs.readFileSync(path.join(root, "dist/client/index.html"), "utf8");
 const operationsHtml = fs.readFileSync(path.join(root, "dist/client/operations.html"), "utf8");
 assert.match(appHtml, /id="app"/, "the public root should load the Rivo application shell");
-assert.match(appHtml, /canonical-host\.js\?v=46/, "cached static pages should still redirect the retired Sites hostname");
+assert.match(appHtml, /canonical-host\.js\?v=\d+/, "cached static pages should still redirect the retired Sites hostname");
 assert.match(appHtml, /Content-Security-Policy/, "the static application shell should enforce browser content restrictions at the CDN edge");
-assert.match(appHtml, /app\.js\?v=45/, "the public root should load the latest Rivo app bundle");
+assert.match(appHtml, /app\.js\?v=\d+/, "the public root should load the latest Rivo app bundle");
 assert.match(operationsHtml, /id="app"/, "the dispatcher route should retain the operations application shell");
-assert.match(operationsHtml, /app\.js\?v=45/, "the dispatcher route should load the latest Rivo app bundle");
+assert.match(operationsHtml, /app\.js\?v=\d+/, "the dispatcher route should load the latest Rivo app bundle");
 
 const hosting = JSON.parse(fs.readFileSync(path.join(root, "dist/.openai/hosting.json"), "utf8"));
 if (!hosting.project_id) {
@@ -42,7 +43,11 @@ if (!hosting.project_id) {
 
 const appSource = fs.readFileSync(path.join(root, "dist/client/app.js"), "utf8");
 const stylesSource = fs.readFileSync(path.join(root, "dist/client/styles.css"), "utf8");
-assert.match(appSource, /Run the delivery day without the chaos/, "the app subdomain should render the Rivo login portal");
+assert.match(stylesSource, /\[hidden\]\s*\{\s*display:\s*none\s*!important/, "hidden empty states must not be exposed by component display rules");
+assert.match(appSource, /const DEFAULT_PICKUP_ADDRESS = ""/, "new workspaces must not inherit another business depot");
+assert.match(appSource, /await requestText\(/, "delivery overrides must use an in-app confirmation form");
+assert.doesNotMatch(appSource, /const overrideReason = window\.prompt/, "delivery completion must not depend on unsupported native prompts");
+assert.match(appSource, /id="login-form"/, "the app subdomain should render the Rivo login portal");
 assert.match(appSource, /Rivo app/, "the app portal should use the Rivo company name");
 assert.match(appSource, /Business profile/, "dispatcher workspaces should include operational settings");
 assert.match(appSource, /Nothing on this page creates a charge/, "plan settings must not create accidental charges");
@@ -51,7 +56,7 @@ assert.match(appSource, /Smart Dispatch/, "the dispatcher should expose explaina
 assert.match(appSource, /Optimize deliveries/, "dispatchers should be able to preview a route plan before applying it");
 assert.match(appSource, /Live operations data/, "analytics should identify the source of its operational metrics");
 assert.match(appSource, /Route capacity/, "driver profiles should include capacity for workload planning");
-assert.match(appSource, /Add or connect orders/, "onboarding should support manual entry without forcing an integration");
+assert.match(appSource, /data-action="open-create-delivery"/, "onboarding should support manual entry without forcing an integration");
 assert.match(appSource, /Next delivery/, "the mobile driver workflow should make the next stop obvious");
 assert.match(appSource, /First time here\?/, "the app login should explain driver invite passwords");
 assert.doesNotMatch(appSource, /lead-capture-form|Request demo|Request pilot/, "the app subdomain should not expose a public sales form");
@@ -69,7 +74,7 @@ assert.match(
   /renderGoogleRoutes[\s\S]*if \(!rendered\) return useLiveMap\(\)/,
   "route preview should fall back to the live GPS map only when route rendering is unavailable"
 );
-assert.match(appSource, /Waiting for driver GPS/, "the live map should explain its pre-location state");
+assert.match(appSource, /driver GPS is not required/, "the dispatcher map remains available before a location update");
 assert.match(appSource, /https:\/\/tiles\.openfreemap\.org\/styles\/positron/, "the live GPS fallback should use a real keyless basemap");
 assert.match(appSource, /rova-live-routes/, "the keyless basemap should render live route paths");
 assert.match(stylesSource, /\.google-map\.maplibregl-map/, "the keyless basemap should fill the live map panel");
@@ -94,10 +99,13 @@ assert.match(appSource, /Search customer, order, address, or driver/, "the daily
 assert.match(stylesSource, /\.today-glance/, "the dispatch view should include a compact daily closeout summary");
 assert.match(appSource, /Arrange dashboard sections/, "dispatchers should be able to open dashboard customization");
 assert.match(appSource, /rivoDispatcherDashboardLayoutV3/, "dashboard layout preferences should persist on the device");
-assert.match(appSource, /Dispatch workflow/, "the daily dashboard should expose a clear orders-to-route-to-active flow");
+assert.match(appSource, /Dispatch workspace/, "the daily dashboard should expose task-focused navigation");
+assert.match(appSource, /operationsPane: "orders"/, "dispatch should open directly on the queue");
+assert.match(appSource, /Send to driver/, "the primary dispatch action should be clear");
 assert.match(appSource, /hidden: \["assistant", "create"\]/, "secondary tools should stay out of the default dispatch flow");
 assert.match(appSource, /: \[\.\.\.defaults\.hidden\]/, "a fresh dashboard must retain the simplified default visibility");
-assert.match(appSource, /No orders yet/, "an empty queue should use one concise action state");
+assert.match(appSource, /Your queue is clear/, "an empty queue should use one concise action state");
+assert.match(appHtml, /workspace\.css\?v=\d+/, "the application should include the compact workspace styles");
 assert.match(appSource, /Route details & customer links/, "active delivery detail should stay collapsed until needed");
 assert.match(appSource, /data-dashboard-drag-handle/, "dashboard sections should support drag-and-drop ordering");
 assert.match(appSource, /resize-dashboard-widget/, "dashboard sections should support compact or full-width sizing");
@@ -105,7 +113,7 @@ assert.match(stylesSource, /\.dashboard-board[\s\S]*grid-template-columns: repea
 assert.match(stylesSource, /\.dispatch-side-stack,\s*\n\.route-preview-panel \{\s*\n\s*position: static/, "the route map should stay in normal page flow while scrolling");
 assert.match(appSource, /Repair owner sign-in/, "legacy owner accounts should have a visible recovery flow");
 assert.match(appSource, /\/api\/auth\/owner-recovery/, "the owner recovery form should use the protected recovery endpoint");
-assert.match(appSource, /Connect stores and order webhooks/, "connections should be a first-class product workflow");
+assert.match(appSource, /data-view="channels"/, "connections should be a first-class product workflow");
 assert.doesNotMatch(appSource, /Revenue ladder|SaaS target model|data-view="growth"|id="growth"|Growth plan/, "public app bundle should not ship old growth strategy copy");
 
 const workerPath = path.join(root, "dist/server/index.js");
@@ -125,7 +133,15 @@ class FakeD1Statement {
     return new FakeD1Statement(this.database, this.sql, bindings);
   }
 
+  async all() {
+    if (this.sql.startsWith("SELECT state_key FROM rivo_driver_directory")) return {results:[]};
+    throw new Error(`Unsupported D1 query: ${this.sql}`);
+  }
+
   async first() {
+    // Single-workspace fixture; multi-tenant directory behavior is covered by
+    // validate-self-serve using the SQLite-backed D1 adapter.
+    if (this.sql.startsWith("SELECT state_key FROM rivo_workspace_accounts")) return null;
     if (!this.sql.startsWith("SELECT payload_json")) {
       throw new Error(`Unsupported D1 query: ${this.sql}`);
     }
@@ -212,12 +228,21 @@ const setupRequest = new Request("https://vms.test/api/auth/setup", {
   body: JSON.stringify({
     setupCode: "validation-setup-code",
     companyName: "Rivo",
+    pickupAddress: "1675 Cyrville Rd",
     name: "Rivo Owner",
     username: "fleetjetowner",
     password: "validation-password"
   })
 });
 const initialWorker = await loadFreshWorker("initial");
+const missingDepotBody = await setupRequest.clone().json();
+delete missingDepotBody.pickupAddress;
+const missingDepotResponse = await initialWorker.default.fetch(new Request("https://vms.test/api/auth/setup", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(missingDepotBody)
+}), env);
+assert.equal(missingDepotResponse.status, 400, "owner setup must require the customer's own depot");
 const setupResponse = await initialWorker.default.fetch(setupRequest, env);
 assert.equal(setupResponse.status, 201, "owner setup should save to the attached database");
 assert.equal(setupResponse.headers.get("cache-control"), "no-store", "authentication responses must not be cached");
@@ -518,6 +543,37 @@ assert.equal(driverLoginPayload.session.role, "driver");
 assert.equal(driverLoginPayload.snapshot.drivers.length, 1, "driver snapshots must remain private to that driver");
 assert.equal(driverLoginPayload.snapshot.drivers[0].homeAddress, "123 Driver Home Street", "drivers should receive their own home address for commute trips");
 assert.equal(Object.hasOwn(driverLoginPayload.snapshot, "leads"), false, "driver snapshots must not expose the sales pipeline");
+assert.ok(driverLoginPayload.snapshot.assignmentNotifications.every(item=>item.driverId === driverLoginPayload.session.driverId),"assignment alerts are scoped to the signed-in driver");
+const unconfiguredPushResponse=await reloadedWorker.default.fetch(new Request("https://vms.test/api/assignment-notifications/subscribe",{method:"POST",headers:{authorization:`Bearer ${driverLoginPayload.session.token}`,"content-type":"application/json"},body:JSON.stringify({subscription:{}})}),env);
+assert.equal(unconfiguredPushResponse.status,503,"unconfigured phone push is not reported as enabled");
+const privatePushResponse=await reloadedWorker.default.fetch(new Request("https://vms.test/api/assignment-notifications/read",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ids:[]})}),env);
+assert.equal(privatePushResponse.status,401,"notification writes require a real driver session");
+
+// Exercise mileage through real authentication and persistence, not only pure reducers.
+const mileageApi = async (path, body, method = "POST", token = driverLoginPayload.session.token) => reloadedWorker.default.fetch(new Request(`https://vms.test${path}`, {
+  method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) })
+}), env);
+const mileageConsent = await mileageApi("/api/mileage/consent", { enabled: true, deviceId: "validation-device-0001", source: "ios" });
+assert.equal(mileageConsent.status, 200, "driver can consent through authenticated worker");
+const nativeMileageConsent = await mileageConsent.json();
+assert.equal(nativeMileageConsent.tracking.enabled, true);
+assert.equal(nativeMileageConsent.tracking.source, "ios", "authenticated iPhone consent must retain the native source");
+const mileageManual = await mileageApi("/api/mileage/trips", { date: "2026-09-01", from: "PRIVATE MILEAGE START", to: "PRIVATE MILEAGE END", distanceKm: 8.7, reason: "Odometer test fixture" });
+assert.equal(mileageManual.status, 201);
+const manualMileagePayload = await mileageManual.json();
+const manualMileage = manualMileagePayload.trips.at(-1);
+assert.ok(manualMileage, "mileage record persists through D1 storage");
+assert.equal((await mileageApi(`/api/mileage/trips/${manualMileage.id}`, { category: "personal" }, "PATCH")).status, 200);
+const dispatcherMileage = await mileageApi("/api/mileage", undefined, "GET", setupPayload.session.token);
+assert.doesNotMatch(await dispatcherMileage.text(), /PRIVATE MILEAGE/, "dispatcher has no private mileage access");
+const mileageSnapshotResponse = await mileageApi("/api/me", undefined, "GET");
+const mileageSnapshotPayload = await mileageSnapshotResponse.json();
+assert.equal(mileageSnapshotPayload.snapshot.mileage.trips.at(-1).category, "personal", "driver gets own mileage in live snapshots");
+assert.equal(mileageSnapshotPayload.snapshot.mileage.tracking.source, "ios", "native source persists across authenticated snapshots");
+const hiddenMileageBackup = await mileageApi("/api/admin/backup", undefined, "GET", setupPayload.session.token);
+assert.equal(hiddenMileageBackup.status, 200);
+assert.doesNotMatch(await hiddenMileageBackup.text(), /PRIVATE MILEAGE/, "operational backup cannot bypass personal-trip privacy");
+assert.equal((await mileageApi("/api/mileage/consent", { enabled: false })).status, 200);
 
 const driverEmailUpdateResponse = await reloadedWorker.default.fetch(
   new Request(`https://vms.test/api/drivers/${driverCreatePayload.driver.id}`, {
@@ -773,9 +829,9 @@ const defaultPickupResponse = await reloadedWorker.default.fetch(
   }),
   env
 );
-assert.equal(defaultPickupResponse.status, 201, "a trip without a pickup should still be created");
+assert.equal(defaultPickupResponse.status, 201, "a trip may use the explicitly configured workspace pickup");
 const defaultPickupPayload = await defaultPickupResponse.json();
-assert.equal(defaultPickupPayload.trip.pickup, "1675 Cyrville Rd", "manual trips should use the configured pickup default");
+assert.equal(defaultPickupPayload.trip.pickup, "1675 Cyrville Rd", "manual trips should preserve the configured pickup default");
 
 const companySettingsResponse = await reloadedWorker.default.fetch(
   new Request("https://vms.test/api/company", {
@@ -1096,7 +1152,7 @@ const wixOrders = [
     status: "APPROVED",
     paymentStatus: "PAID",
     fulfillmentStatus: "NOT_FULFILLED",
-    createdDate: "2026-07-22T10:00:00.000Z",
+    createdDate: new Date(Date.now() - 3600000).toISOString(),
     buyerInfo: { email: "open@example.test" },
     fulfillmentInfo: {
       shippingDestination: {
@@ -1110,7 +1166,7 @@ const wixOrders = [
     status: "APPROVED",
     paymentStatus: "PAID",
     fulfillmentStatus: "FULFILLED",
-    createdDate: "2026-07-23T10:00:00.000Z",
+    createdDate: new Date(Date.now() - 1800000).toISOString(),
     buyerInfo: { email: "fulfilled@example.test" },
     fulfillmentInfo: {
       shippingDestination: {
@@ -1139,6 +1195,7 @@ try {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         setupCode: "wix-validation-setup-code",
+        pickupAddress: "1675 Cyrville Rd",
         companyName: "VMS inc.",
         name: "VMS Owner",
         username: "wixowner",
@@ -1187,6 +1244,17 @@ try {
   const fulfilledTrip = firstSyncPayload.snapshot.trips.find((trip) => trip.source?.orderId === "wix-fulfilled-1");
   const openTrip = firstSyncPayload.snapshot.trips.find((trip) => trip.source?.orderId === "wix-open-1");
   assert.equal(fulfilledTrip?.source?.fulfillmentStatus, "FULFILLED");
+  assert.equal(fulfilledTrip.status, "order-review", "Wix-fulfilled imports need an explicit decision before redispatch");
+  const heldDispatch = await wixWorker.default.fetch(new Request("https://vms.test/api/trips/bulk", {
+    method: "POST", headers: authHeaders,
+    body: JSON.stringify({ action: "assign", tripIds: [fulfilledTrip.id], driverId: wixDriverPayload.driver.id })
+  }), wixEnv);
+  assert.equal(heldDispatch.status, 400, "a fulfilled upstream order cannot silently enter a new route");
+  const confirmDelivery = await wixWorker.default.fetch(new Request(`https://vms.test/api/trips/${fulfilledTrip.id}/fulfillment`, {
+    method: "POST", headers: authHeaders,
+    body: JSON.stringify({ fulfillmentMethod: "delivery", destination: fulfilledTrip.destination })
+  }), wixEnv);
+  assert.equal(confirmDelivery.status, 200, "dispatch can explicitly confirm that a Wix-fulfilled order still needs driver delivery");
 
   const bulkAssignResponse = await wixWorker.default.fetch(
     new Request("https://vms.test/api/trips/bulk", {
@@ -1204,8 +1272,52 @@ try {
   assert.equal(bulkAssignResponse.status, 200, "selected orders should support one-step bulk assignment");
   const bulkAssignPayload = await bulkAssignResponse.json();
   assert.equal(bulkAssignPayload.updated, 2);
+  const assignmentAlert=bulkAssignPayload.snapshot.assignmentNotifications.find(item=>item.driverId === wixDriverPayload.driver.id && [openTrip.id,fulfilledTrip.id].every(id=>item.tripIds.includes(id)));
+  assert.ok(assignmentAlert,"bulk assignment durably creates a single driver alert for the batch");
   assert.ok(bulkAssignPayload.trips.every((trip) => trip.driverId === wixDriverPayload.driver.id));
   assert.ok(bulkAssignPayload.trips.every((trip) => trip.status === "queued"), "assignment should not start the route");
+
+  const previewBefore = wixDatabase.row.payload_json;
+  const previewRequest = (body, headers = authHeaders) => wixWorker.default.fetch(new Request("https://vms.test/api/routes/preview", {
+    method: "POST", headers, body: JSON.stringify(body)
+  }), wixEnv);
+  assert.equal((await previewRequest({tripIds: [openTrip.id]}, {"content-type":"application/json"})).status, 401, "route planning requires dispatcher authentication");
+  assert.equal((await previewRequest({tripIds: []})).status, 400);
+  assert.equal((await previewRequest({tripIds: ["unknown-order"]})).status, 400);
+  assert.equal((await previewRequest({tripIds: [openTrip.id], driverId: "unknown-driver"})).status, 400);
+  const draftPreview = await previewRequest({tripIds: [fulfilledTrip.id, openTrip.id], driverId: wixDriverPayload.driver.id, origin: "1675 Cyrville Rd"});
+  assert.equal(draftPreview.status, 200);
+  const draftPlan = await draftPreview.json();
+  assert.deepEqual(draftPlan.tripIds, [fulfilledTrip.id, openTrip.id], "without Google optimization the selected manual order stays intact");
+  assert.equal(draftPlan.optimized, false);
+  assert.equal(draftPlan.durationMinutes, null, "missing Google data must not become a fictitious ETA");
+  assert.equal(wixDatabase.row.payload_json, previewBefore, "route preview is read-only and does not start or change deliveries");
+
+  // Verify Google's order and summary, then reject malformed waypoint permutations.
+  wixEnv.GOOGLE_MAPS_SERVER_API_KEY = "test-route-key";
+  let googleOrder = [1, 0];
+  const wixFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    if (String(input) !== "https://routes.googleapis.com/directions/v2:computeRoutes") return wixFetch(input, init);
+    const body = JSON.parse(init.body);
+    assert.equal(body.origin.address, "1675 Cyrville Rd");
+    assert.equal(body.destination.address, "1675 Cyrville Rd");
+    return new Response(JSON.stringify({routes:[{optimizedIntermediateWaypointIndex:googleOrder, distanceMeters:12400, duration:"1800s"}]}), {status:200, headers:{"content-type":"application/json"}});
+  };
+  const googlePlan = await (await previewRequest({tripIds:[openTrip.id, fulfilledTrip.id]})).json();
+  assert.deepEqual(googlePlan.tripIds, [fulfilledTrip.id, openTrip.id]);
+  assert.equal(googlePlan.optimized, true);
+  assert.equal(googlePlan.distanceKm, 12.4);
+  assert.equal(googlePlan.durationMinutes, 30);
+  for (const invalidOrder of [[0,0], [0,2], [0,-1], [0,0.5], [0]]) {
+    googleOrder = invalidOrder;
+    const malformed = await (await previewRequest({tripIds:[openTrip.id, fulfilledTrip.id]})).json();
+    assert.deepEqual(malformed.tripIds, [openTrip.id, fulfilledTrip.id], "malformed optimization must never lose or duplicate an order");
+    assert.equal(malformed.optimized, false);
+  }
+  assert.equal(wixDatabase.row.payload_json, previewBefore, "Google optimization must not mutate delivery records");
+  delete wixEnv.GOOGLE_MAPS_SERVER_API_KEY;
+  globalThis.fetch = wixFetch;
 
   const singleDispatchResponse = await wixWorker.default.fetch(
     new Request("https://vms.test/api/routes/dispatch", {
@@ -1238,8 +1350,10 @@ try {
       headers: authHeaders,
       body: JSON.stringify({
         driverId: wixDriverPayload.driver.id,
-        tripIds: [openTrip.id, fulfilledTrip.id],
-        origin: "1675 Cyrville Rd"
+        tripIds: [fulfilledTrip.id, openTrip.id],
+        origin: "1675 Cyrville Rd",
+        preserveStopOrder: true,
+        kmRate: 0
       })
     }),
     wixEnv
@@ -1247,6 +1361,9 @@ try {
   assert.equal(fulfilledDispatchResponse.status, 201, "multiple Wix orders should dispatch as one route");
   const fulfilledDispatchPayload = await fulfilledDispatchResponse.json();
   assert.equal(fulfilledDispatchPayload.trips.length, 2);
+  assert.equal(fulfilledDispatchPayload.trips[0].id, fulfilledTrip.id, "sending preserves the exact order reviewed in the route plan");
+  assert.ok(fulfilledDispatchPayload.trips.every(trip => trip.kmRate === 0), "an explicit zero per-km rate must not silently become a paid rate");
+  assert.equal((await previewRequest({tripIds:[fulfilledTrip.id]})).status, 400, "active deliveries cannot be accidentally planned as queued orders");
   assert.equal(fulfilledDispatchPayload.trips[0].routeId, fulfilledDispatchPayload.trips[1].routeId);
   assert.equal(fulfilledDispatchPayload.trips[0].status, "active");
   assert.equal(fulfilledDispatchPayload.trips[0].driverId, wixDriverPayload.driver.id);
@@ -1742,6 +1859,7 @@ const legacySetupResponse = await legacyWorker.default.fetch(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       setupCode: "legacy-recovery-code",
+      pickupAddress: "123 Test Depot, Ottawa",
       companyName: "Legacy Rivo",
       name: "Legacy Owner",
       username: "legacy.owner",

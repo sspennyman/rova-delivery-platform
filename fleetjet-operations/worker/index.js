@@ -1,6 +1,14 @@
+import {searchWixOrders} from "./wix-search.js";
+import { handleMileage, mileageSnapshot, finishTrip, personalMileageDriverId } from "./mileage.js";
+import { prepareAutomaticStops, detectAutomaticCompletion } from "./auto-delivery.js";
+import { wixFulfillment, isNonDeliveryOrder, fulfillmentMethodForTrip } from "../public/order-fulfillment.js";
+import {pushConfigured, validatedPushSubscription, assignmentBaseline, queueAssignmentNotifications, publicAssignmentNotifications, deliverAssignmentPush} from "./assignment-notifications.js";
+import { sendDriverInvite } from "./driver-invitations.js";
+import { workspaceKey, scopedToken, scopeEnvironment, ensureWorkspaceDirectory } from "./workspaces.js";
+import {handlePublicApi, publicApiKey} from './public-api.js';
 const clients = new Set();
 const DEFAULT_COMPANY_NAME = "Rivo";
-const DEFAULT_PICKUP_ADDRESS = "1675 Cyrville Rd";
+const DEFAULT_PICKUP_ADDRESS = "";
 const WIX_PICKUP_NAME = "Cyrville";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const SESSION_COOKIE_NAME = "rivo_session";
@@ -20,7 +28,7 @@ const COURIER_REQUEST_METHODS = new Set(["email", "booking", "manual"]);
 const COURIER_REQUEST_STATUSES = new Set(["ready-to-share", "send-failed", "requested", "accepted", "picked-up", "delivered", "declined", "cancelled"]);
 const OPEN_COURIER_REQUEST_STATUSES = new Set(["ready-to-share", "send-failed", "requested", "accepted", "picked-up"]);
 const CUSTOMER_VISIBLE_COURIER_REQUEST_STATUSES = new Set(["requested", "accepted", "picked-up", "delivered"]);
-const LEAD_ORIGINS = new Set(["https://floraljet.llc", "https://www.floraljet.llc"]);
+const LEAD_ORIGINS = new Set(["https://floraljet.llc", "https://www.floraljet.llc", "https://rivo-delivery.higgsfield.app"]);
 const APP_CANONICAL_HOST = "app.floraljet.llc";
 const APP_HOSTING_ALIASES = new Set(["delivery-driver-tracker.spennyman.chatgpt.site"]);
 const PROOF_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
@@ -103,7 +111,7 @@ function normalizeTripType(value) {
 }
 
 function isBusinessTrip(trip) {
-  return normalizeTripType(trip.tripType) === "business";
+  return !isNonDeliveryOrder(trip) && normalizeTripType(trip.tripType) === "business";
 }
 
 function makeId(prefix) {
@@ -237,31 +245,6 @@ async function tokenHash(token) {
   return legacyPasswordHash(token, "vms-driver-invite");
 }
 
-async function sendDriverInvite(env, driver, inviteUrl) {
-  const apiKey = String(env.RESEND_API_KEY || "").trim();
-  const from = String(env.INVITE_FROM_EMAIL || "").trim();
-  if (!apiKey || !from) return { sent: false, reason: "Email delivery is not configured." };
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      from,
-      to: [driver.email],
-      subject: "You’re invited to Rivo",
-      text: `Hi ${driver.name},\n\nYou’ve been invited to join Rivo as a driver. Create your password and sign in here:\n${inviteUrl}\n\nThis link expires in 7 days.`
-    })
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Invitation email could not be sent (${response.status}): ${detail.slice(0, 180)}`);
-  }
-  const payload = await response.json().catch(() => ({}));
-  return { sent: true, providerMessageId: String(payload.id || "") };
-}
-
 function courierRequestSummary(db, courierRequest, partner) {
   const deliveries = Array.isArray(courierRequest.deliveries) ? courierRequest.deliveries : [];
   const lines = [
@@ -311,7 +294,7 @@ async function sendCourierRequestEmail(env, db, courierRequest, partner) {
 }
 
 async function prepareDriverInvitation(driver, origin) {
-  const inviteToken = makeToken(32);
+  const inviteToken = scopedToken({company:{workspaceKey:driver.workspaceKey}}, makeToken(32));
   driver.inviteTokenHash = await tokenHash(inviteToken);
   driver.inviteCreatedAt = nowIso();
   driver.inviteExpiresAt = new Date(Date.now() + INVITE_TTL_MS).toISOString();
@@ -338,6 +321,7 @@ async function deliverDriverInvitation(env, driver, inviteUrl) {
 }
 
 async function persistAndDeliverDriverInvitation(db, env, driver, origin) {
+  driver.workspaceKey = db.company.workspaceKey || "primary";
   const { inviteUrl } = await prepareDriverInvitation(driver, origin);
   // Make the token valid before an email or manual-share link can leave this request.
   // If this compare-and-swap loses a race, no unusable invitation is sent.
@@ -415,6 +399,7 @@ function routeStopsForTrip(trip) {
 }
 
 function syncTrackingStops(trip) {
+  if (isNonDeliveryOrder(trip)) return [];
   const deliveryStops = routeStopsForTrip(trip).slice(1);
   const previousStops = Array.isArray(trip.trackingStops) ? trip.trackingStops : [];
   const usedPrevious = new Set();
@@ -580,7 +565,7 @@ async function ensureNormalizedProjection(env = {}) {
 async function syncNormalizedProjection(db, env = {}) {
   if (!(await ensureNormalizedProjection(env))) return false;
   const updatedAt = nowIso();
-  const businessId = "primary";
+  const businessId = workspaceKey(env.RIVO_STATE_KEY);
   const statements = [];
   const add = (sql, ...bindings) => statements.push(env.DB.prepare(sql).bind(...bindings));
   add(
@@ -599,7 +584,7 @@ async function syncNormalizedProjection(db, env = {}) {
     add(
       `INSERT INTO rova_users (id, business_id, role, name, email, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET name = excluded.name, email = excluded.email, status = excluded.status, updated_at = excluded.updated_at`,
-      "owner",
+      businessId === "primary" ? "owner" : `${businessId}:owner`,
       businessId,
       "owner",
       db.ownerAccount.name || "Owner",
@@ -779,7 +764,8 @@ async function migrateDb(db) {
       deliveryZones: "",
       defaultWindowMinutes: 120,
       requirePhoto: false,
-      requireSignature: false
+      requireSignature: false,
+      autoComplete: true
     },
     notifications: {
       customerTracking: true,
@@ -880,7 +866,7 @@ async function migrateDb(db) {
     changed = true;
   }
   for (const [index, driver] of db.drivers.entries()) {
-    if (!driver.loginId) {
+    if (!driver.loginId && !driver.usesDispatcherLogin) {
       driver.loginId = index === 0 ? "ava" : index === 1 ? "miles" : String(driver.name || driver.id).trim().toLowerCase().replace(/\s+/g, ".");
       changed = true;
     }
@@ -994,7 +980,15 @@ async function migrateDb(db) {
 }
 
 async function readDb(env = {}) {
+  const stateKey = workspaceKey(env.RIVO_STATE_KEY);
   if (!hasPersistentDatabase(env)) {
+    if (stateKey !== "primary") {
+      globalThis.__rivoWorkspaces ||= new Map();
+      if (!globalThis.__rivoWorkspaces.has(stateKey)) globalThis.__rivoWorkspaces.set(stateKey, seededDb());
+      const scoped = globalThis.__rivoWorkspaces.get(stateKey);
+      await migrateDb(scoped);
+      return scoped;
+    }
     if (!globalThis.__deliveryTrackerDb) globalThis.__deliveryTrackerDb = seededDb();
     await migrateDb(globalThis.__deliveryTrackerDb);
     return globalThis.__deliveryTrackerDb;
@@ -1003,8 +997,11 @@ async function readDb(env = {}) {
   await ensurePersistentDatabase(env);
   const row = await env.DB
     .prepare(`SELECT payload_json, updated_at FROM ${PERSISTED_DB_TABLE} WHERE state_key = ?`)
-    .bind(PERSISTED_DB_KEY)
+    .bind(stateKey)
     .first();
+  if (stateKey !== "primary" && !row?.payload_json) {
+    const error = new Error("Workspace not found."); error.status = 404; throw error;
+  }
   let db = seededDb();
   let shouldWrite = !row?.payload_json;
   if (row?.payload_json) {
@@ -1031,8 +1028,19 @@ async function readDb(env = {}) {
 }
 
 async function writeDb(db, env = {}) {
+  const stateKey = workspaceKey(env.RIVO_STATE_KEY);
+  if (stateKey !== "primary") {
+    for (const trip of db.trips) {
+      if (trip.shareToken) trip.shareToken = scopedToken(db, trip.shareToken);
+      for (const stop of trip.trackingStops || []) if (stop.shareToken) stop.shareToken = scopedToken(db, stop.shareToken);
+    }
+  }
+  const assignments = db.__assignmentActor === "dispatcher" ? queueAssignmentNotifications(db,db.__assignmentBefore,nowIso(),makeId) : [];
   if (!hasPersistentDatabase(env)) {
-    globalThis.__deliveryTrackerDb = db;
+    if (stateKey === "primary") globalThis.__deliveryTrackerDb = db;
+    else { globalThis.__rivoWorkspaces ||= new Map(); globalThis.__rivoWorkspaces.set(stateKey, db); }
+    if (db.__assignmentBefore) db.__assignmentBefore = assignmentBaseline(db.trips);
+    if (assignments.length) await deliverAssignmentPush(db,env,assignments);
     return;
   }
   await ensurePersistentDatabase(env);
@@ -1046,7 +1054,7 @@ async function writeDb(db, env = {}) {
            SET payload_json = ?, updated_at = ?
            WHERE state_key = ? AND updated_at = ?`
         )
-        .bind(payloadJson, nextVersion, PERSISTED_DB_KEY, expectedVersion)
+        .bind(payloadJson, nextVersion, stateKey, expectedVersion)
         .run()
     : await env.DB
         .prepare(
@@ -1054,7 +1062,7 @@ async function writeDb(db, env = {}) {
            VALUES (?, ?, ?)
            ON CONFLICT(state_key) DO NOTHING`
         )
-        .bind(PERSISTED_DB_KEY, payloadJson, nextVersion)
+        .bind(stateKey, payloadJson, nextVersion)
         .run();
   if (Number(result?.meta?.changes || 0) !== 1) {
     const error = new Error("This workspace changed in another request. Refresh and try again.");
@@ -1062,9 +1070,20 @@ async function writeDb(db, env = {}) {
     throw error;
   }
   db.__persistedUpdatedAt = nextVersion;
+  if (stateKey !== "primary") {
+    await ensureWorkspaceDirectory(env);
+    for(const driver of db.drivers.filter(d=>!d.archivedAt && d.email)) await env.DB.prepare('INSERT INTO rivo_driver_directory (email,state_key) VALUES (?,?) ON CONFLICT(email,state_key) DO NOTHING').bind(normalizeEmail(driver.email),stateKey).run();
+  }
+  if (db.__assignmentBefore) db.__assignmentBefore = assignmentBaseline(db.trips);
   await syncNormalizedProjection(db, env).catch((error) => {
     console.error("Normalized Rivo projection could not be refreshed", error);
   });
+  if (assignments.length) {
+    await deliverAssignmentPush(db,env,assignments);
+    // The assignment itself is already durable. A concurrent update must not
+    // turn a notification-status save into a failed dispatch.
+    await writeDb(db,env).catch(()=>console.warn("Assignment saved; notification status could not be refreshed."));
+  }
 }
 
 function publicDriver(driver, options = {}) {
@@ -1073,6 +1092,7 @@ function publicDriver(driver, options = {}) {
     name: driver.name,
     phone: driver.phone,
     email: driver.email || "",
+    usesDispatcherLogin: Boolean(driver.usesDispatcherLogin),
     vehicle: driver.vehicle,
     shift: driver.shift || "",
     defaultRate: driver.defaultRate,
@@ -1093,7 +1113,7 @@ function publicDriver(driver, options = {}) {
           : "needs-invite";
     output.loginId = driver.loginId || "";
     output.homeAddress = driver.homeAddress || "";
-    output.inviteStatus = inviteStatus;
+    output.inviteStatus = driver.usesDispatcherLogin ? "linked" : inviteStatus;
     output.inviteCreatedAt = driver.inviteCreatedAt || null;
     output.inviteExpiresAt = driver.inviteExpiresAt || null;
     output.inviteEmailStatus = driver.inviteEmailStatus || "not-sent";
@@ -1191,7 +1211,7 @@ function publicProofMedia(media = {}) {
 function publicProof(proof) {
   if (!proof || typeof proof !== "object") return null;
   const output = {
-    method: String(proof.method || "Delivery completed"),
+    method: proof.kind === "dispatcher-override" ? "Completed by dispatch" : String(proof.method || "Delivery completed"),
     recipient: String(proof.recipient || ""),
     outcome: String(proof.outcome || ""),
     exceptionReason: String(proof.exceptionReason || ""),
@@ -1219,7 +1239,7 @@ function publicProof(proof) {
 function publicCustomerProof(proof) {
   if (!proof || typeof proof !== "object") return null;
   const output = {
-    method: String(proof.method || "Delivery completed"),
+    method: proof.kind === "dispatcher-override" ? "Completed by dispatch" : String(proof.method || "Delivery completed"),
     recipient: String(proof.recipient || ""),
     recordedAt: proof.recordedAt || null
   };
@@ -1268,6 +1288,7 @@ function resetTripForDispatch(trip) {
   delete trip.courierRequestId;
   delete trip.courierPartnerId;
   delete trip.fulfillmentType;
+  for (const key of ["autoDelivery", "completionRecordedAt", "completionSource", "completionTimeEstimated", "completionTimeUnknown"]) delete trip[key];
   trip.endedAt = null;
   trip.path = [];
   trip.location = null;
@@ -1387,7 +1408,7 @@ function publicTrip(db, trip) {
     : null;
   const tripType = normalizeTripType(trip.tripType);
   const distanceKm = Number(trip.distanceKm || 0);
-  const businessDistanceKm = tripType === "business" ? distanceKm : 0;
+  const businessDistanceKm = !isNonDeliveryOrder(trip) && tripType === "business" ? distanceKm : 0;
   const personalDistanceKm = tripType === "personal" ? distanceKm : 0;
   const { pendingProofMedia: _pendingProofMedia, proof, proofHistory, ...publicFields } = trip;
   return {
@@ -1395,8 +1416,8 @@ function publicTrip(db, trip) {
     proof: publicProof(proof),
     proofHistory: (Array.isArray(proofHistory) ? proofHistory : []).map(publicProof).filter(Boolean),
     tripType,
-    stops: routeStopsForTrip(trip),
-    trackingStops: trackingStopsForTrip(trip),
+    stops: isNonDeliveryOrder(trip) ? [] : routeStopsForTrip(trip),
+    trackingStops: isNonDeliveryOrder(trip) ? [] : trackingStopsForTrip(trip),
     driver: driver ? publicDriver(driver) : null,
     courier: courierRequest && courierPartner ? {
       requestId: courierRequest.id,
@@ -1554,7 +1575,7 @@ function planFeatureGates(db) {
 }
 
 function operationsAnalytics(db) {
-  const trips = db.trips || [];
+  const trips = (db.trips || []).filter(trip => !isNonDeliveryOrder(trip));
   const completed = trips.filter((trip) => ["completed", "delivered", "submitted", "approved", "rejected"].includes(trip.status));
   const failed = trips.filter((trip) => trip.status === "failed" || trip.deliveryOutcomeStatus === "failed");
   const late = trips.filter((trip) => {
@@ -1563,7 +1584,7 @@ function operationsAnalytics(db) {
     const finished = trip.endedAt ? new Date(trip.endedAt).getTime() : Date.now();
     return Number.isFinite(deadline) && finished > deadline && !["queued"].includes(trip.status);
   });
-  const timedCompleted = completed.filter((trip) => trip.startedAt && trip.endedAt);
+  const timedCompleted = completed.filter((trip) => trip.startedAt && trip.endedAt && !trip.completionTimeUnknown && !trip.completionTimeEstimated);
   const durationMinutes = timedCompleted.reduce((total, trip) => {
     return total + Math.max(0, new Date(trip.endedAt).getTime() - new Date(trip.startedAt).getTime()) / 60000;
   }, 0);
@@ -1601,10 +1622,10 @@ function operationalAlerts(db) {
   const plan = currentPlan(db);
   const activeDriverCount = db.drivers.filter((driver) => !driver.archivedAt).length;
   const monthPrefix = nowIso().slice(0, 7);
-  const monthlyDeliveryCount = db.trips.filter((trip) => String(trip.importedAt || trip.startedAt || "").startsWith(monthPrefix)).length;
+  const monthlyDeliveryCount = db.trips.filter((trip) => !isNonDeliveryOrder(trip) && String(trip.importedAt || trip.startedAt || "").startsWith(monthPrefix)).length;
   if (activeDriverCount >= plan.driverLimit) alerts.push({ type: "plan-drivers", severity: "medium", count: activeDriverCount, message: `${activeDriverCount} of ${plan.driverLimit} plan driver seats are in use` });
   if (monthlyDeliveryCount >= Math.ceil(plan.deliveryLimit * 0.9)) alerts.push({ type: "plan-deliveries", severity: monthlyDeliveryCount >= plan.deliveryLimit ? "high" : "medium", count: monthlyDeliveryCount, message: `${monthlyDeliveryCount} of ${plan.deliveryLimit} monthly deliveries are recorded` });
-  const unassigned = db.trips.filter((trip) => trip.status === "queued" && !trip.driverId && !trip.courierRequestId);
+  const unassigned = db.trips.filter((trip) => !isNonDeliveryOrder(trip) && trip.status === "queued" && !trip.driverId && !trip.courierRequestId);
   if (unassigned.length) alerts.push({ type: "unassigned", severity: "high", count: unassigned.length, message: `${unassigned.length} queued deliver${unassigned.length === 1 ? "y has" : "ies have"} no driver` });
   const late = db.trips.filter((trip) => trip.status === "active" && trip.deliveryWindowEnd && new Date(trip.deliveryWindowEnd).getTime() < now);
   if (late.length) alerts.push({ type: "late", severity: "high", count: late.length, message: `${late.length} active deliver${late.length === 1 ? "y is" : "ies are"} past the delivery window` });
@@ -1615,6 +1636,9 @@ function operationalAlerts(db) {
 
 function snapshot(db, env) {
   return {
+    assignmentNotifications: publicAssignmentNotifications(db),
+    assignmentPush: {configured:pushConfigured(env)},
+    mileage: mileageSnapshot(db),
     company: companyForEnv(db, env),
     plans: Object.values(PLAN_CATALOG),
     planAccess: currentPlan(db),
@@ -1655,7 +1679,7 @@ async function driverByLogin(db, identifier, password) {
   const normalizedIdentifier = normalizePhone(identifier);
   const loginText = String(identifier || "").trim().toLowerCase();
   for (const driver of db.drivers) {
-    if (driver.archivedAt) continue;
+    if (driver.archivedAt || driver.usesDispatcherLogin) continue;
     const phoneMatches = normalizedIdentifier && normalizePhone(driver.phone) === normalizedIdentifier;
     const loginMatches = loginText && String(driver.loginId || "").toLowerCase() === loginText;
     const emailMatches = loginText && normalizeEmail(driver.email) === loginText;
@@ -1668,6 +1692,9 @@ function driverSnapshot(db, env, driverId) {
   const driver = driverById(db, driverId);
   if (!driver) return null;
   return {
+    assignmentNotifications: publicAssignmentNotifications(db,driverId),
+    assignmentPush: {configured:pushConfigured(env),publicKey:String(env.VAPID_PUBLIC_KEY || ""),enabled:(db.pushSubscriptions || []).some(item=>item.driverId === driverId && !item.disabledAt && Date.parse(item.sessionExpiresAt)>Date.now())},
+    mileage: mileageSnapshot(db, driverId),
     company: companyForEnv(db, env),
     weekKey: weekKey(),
     integrations: { connections: [] },
@@ -1689,10 +1716,11 @@ function cleanSessions(db) {
 function createSession(db, user) {
   cleanSessions(db);
   const session = {
-    token: makeToken(),
+    token: scopedToken(db, makeToken()),
     role: user.role,
     name: user.name,
     driverId: user.driverId || "",
+    accountKey: user.role === "dispatcher" ? user.accountKey || "" : "",
     createdAt: nowIso(),
     expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString()
   };
@@ -1729,12 +1757,13 @@ function sessionFromRequest(request, db, url) {
   return session;
 }
 
-function publicSession(session) {
+function publicSession(session, db) {
   return {
     token: session.token,
     role: session.role,
     name: session.name,
     driverId: session.driverId || "",
+    mileageDriverId: db ? personalMileageDriverId(db, session) || "" : "",
     expiresAt: session.expiresAt
   };
 }
@@ -1785,7 +1814,7 @@ function runtimeReadiness(db, env = {}) {
   };
 }
 
-async function optimizedStopOrder(env, origin, destinations) {
+async function optimizedStopOrder(env, origin, destinations, returnAddress = origin) {
   const apiKey = String(env.GOOGLE_MAPS_SERVER_API_KEY || env.GOOGLE_MAPS_API_KEY || "").trim();
   const fallbackOrder = destinations.map((_, index) => index);
   if (!apiKey || destinations.length < 2) return { order: fallbackOrder, optimized: false, distanceKm: null, durationMinutes: null };
@@ -1798,7 +1827,7 @@ async function optimizedStopOrder(env, origin, destinations) {
     },
     body: JSON.stringify({
       origin: { address: origin },
-      destination: { address: origin },
+      destination: { address: returnAddress },
       intermediates: destinations.map((address) => ({ address })),
       travelMode: "DRIVE",
       routingPreference: "TRAFFIC_AWARE",
@@ -1809,19 +1838,19 @@ async function optimizedStopOrder(env, origin, destinations) {
   const payload = await response.json();
   const route = payload.routes?.[0] || {};
   const order = route.optimizedIntermediateWaypointIndex;
-  const durationSeconds = Number(String(route.duration || "").replace(/s$/, ""));
+  const durationSeconds = route.duration ? Number(String(route.duration).replace(/s$/, "")) : NaN;
   const summary = {
-    distanceKm: Number.isFinite(Number(route.distanceMeters)) ? Number((Number(route.distanceMeters) / 1000).toFixed(1)) : null,
+    distanceKm: route.distanceMeters != null && Number.isFinite(Number(route.distanceMeters)) ? Number((Number(route.distanceMeters) / 1000).toFixed(1)) : null,
     durationMinutes: Number.isFinite(durationSeconds) ? Math.round(durationSeconds / 60) : null
   };
-  return Array.isArray(order) && order.length === destinations.length
+  return Array.isArray(order) && order.length === destinations.length && new Set(order).size === destinations.length && order.every(index => Number.isInteger(index) && index >= 0 && index < destinations.length)
     ? { order, optimized: true, ...summary }
     : { order: fallbackOrder, optimized: false, ...summary };
 }
 
 function optimizationCandidates(db, requestedIds = null) {
   const trips = db.trips
-    .filter((trip) => trip.status === "queued" && !openCourierRequestForTrip(db, trip.id) && (!requestedIds || requestedIds.has(trip.id)))
+    .filter((trip) => !isNonDeliveryOrder(trip) && trip.status === "queued" && !openCourierRequestForTrip(db, trip.id) && (!requestedIds || requestedIds.has(trip.id)))
     .sort((left, right) => {
       const priorityRank = { urgent: 0, priority: 1, standard: 2 };
       const priorityDelta = (priorityRank[left.priority] ?? 2) - (priorityRank[right.priority] ?? 2);
@@ -1832,7 +1861,7 @@ function optimizationCandidates(db, requestedIds = null) {
     });
   const drivers = db.drivers.filter((driver) => {
     return driver.status !== "offline"
-      && Boolean(driver.passwordHash || driver.inviteAcceptedAt)
+      && Boolean(driver.passwordHash || driver.inviteAcceptedAt || driver.usesDispatcherLogin)
       && !activeRouteStateForDriver(db, driver.id).conflict;
   });
   return { trips, drivers };
@@ -1915,7 +1944,7 @@ async function loginUser(db, env, identifier, password) {
     await passwordMatches(owner, password)
   ) {
     if (owner.passwordAlgorithm !== "pbkdf2-sha256") await setPassword(owner, password);
-    return { role: "dispatcher", name: owner.name || "Owner" };
+    return { role: "dispatcher", name: owner.name || "Owner", accountKey: `dispatcher:${String(owner.username).trim().toLowerCase()}` };
   }
   const credentials = dispatcherCredentials(env);
   if (credentials && String(identifier || "").trim().toLowerCase() === credentials.username && constantTimeEqual(password, credentials.password)) {
@@ -1923,7 +1952,7 @@ async function loginUser(db, env, identifier, password) {
       await setPassword(owner, password);
       owner.updatedAt = nowIso();
     }
-    return { role: "dispatcher", name: owner?.name || "Dispatcher" };
+    return { role: "dispatcher", name: owner?.name || "Dispatcher", accountKey: `dispatcher:${credentials.username}` };
   }
   const driver = await driverByLogin(db, identifier, password);
   if (!driver) return null;
@@ -2097,11 +2126,42 @@ function leadJson(request, body, status = 200) {
 
 async function readBody(request) {
   if (!request.body) return {};
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
   try {
-    return await request.json();
-  } catch {
-    throw new Error("Invalid JSON.");
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 1024 * 1024) {
+        void reader.cancel();
+        throw Object.assign(new Error("Request is too large. Send a smaller batch."), { status: 413 });
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    if (error.status === 413) throw error;
+    throw Object.assign(new Error("Invalid JSON. Please retry the request."), { status: 400 });
+  } finally {
+    reader.releaseLock();
   }
+}
+
+function unsafeBrowserWrite(request, url) {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method) || !url.pathname.startsWith("/api/")) return false;
+  const origin = request.headers.get("origin");
+  if (origin) {
+    if (origin === url.origin) return false;
+    if (url.pathname === "/api/leads" && LEAD_ORIGINS.has(origin)) return false;
+    return true;
+  }
+  // Native clients and authenticated server webhooks send no browser Origin.
+  return request.headers.get("sec-fetch-site") === "cross-site";
 }
 
 function badRequest(message) {
@@ -2123,6 +2183,7 @@ function withSecurityHeaders(response, url) {
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
+  if (url.pathname.startsWith("/api/") || url.pathname === "/events") headers.set("Cache-Control", "no-store");
   if (url.protocol === "https:") headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   if (!url.pathname.startsWith("/api/") && url.pathname !== "/events") headers.set("X-Robots-Tag", "noindex, nofollow");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
@@ -2183,6 +2244,7 @@ function calcDriverStatus(db, driverId) {
 
 function filterTripsForWeek(trips, selectedWeek, driverId) {
   return trips.filter((trip) => {
+    if (isNonDeliveryOrder(trip)) return false;
     if (trip.status === "queued") return false;
     if (!isBusinessTrip(trip)) return false;
     const date = trip.endedAt || trip.startedAt;
@@ -2250,7 +2312,7 @@ function wixConfig(env = {}) {
     orderStatuses: listFromEnv(env, "WIX_ORDER_STATUSES", "APPROVED"),
     paymentStatuses: listFromEnv(env, "WIX_PAYMENT_STATUSES", "PAID"),
     fulfillmentStatuses: listFromEnv(env, "WIX_FULFILLMENT_STATUSES", "NOT_FULFILLED,PARTIALLY_FULFILLED,FULFILLED"),
-    lookbackDays: Number(env.WIX_SYNC_LOOKBACK_DAYS || 14),
+    lookbackDays: 1,
     limit: Math.min(100, Math.max(1, Number(env.WIX_SYNC_LIMIT || 100))),
     pickupLabel: env.WIX_PICKUP_LABEL || WIX_PICKUP_NAME
   };
@@ -2279,7 +2341,7 @@ function formatWixAddress(address = {}) {
   const street = address.streetAddress
     ? [address.streetAddress.number, address.streetAddress.name, address.streetAddress.apt].filter(Boolean).join(" ")
     : "";
-  return [address.addressLine || street, address.city, address.subdivision, address.postalCode, address.country].filter(Boolean).join(", ");
+  return [address.addressLine || address.addressLine1 || street, address.city, address.subdivision, address.postalCode, address.country].filter(Boolean).join(", ");
 }
 
 function wixOrderContact(order = {}) {
@@ -2295,7 +2357,7 @@ function wixOrderAddress(order = {}) {
   return (
     order.shippingInfo?.logistics?.shippingDestination?.address ||
     order.recipientInfo?.address ||
-    order.billingInfo?.address ||
+    order.fulfillmentInfo?.shippingDestination?.address ||
     {}
   );
 }
@@ -2320,6 +2382,7 @@ function wixOrderNotes(order = {}) {
 }
 
 function wixOrderSource(order = {}) {
+  const fulfillment = wixFulfillment(order);
   return {
     system: "wix",
     orderId: order.id,
@@ -2327,7 +2390,11 @@ function wixOrderSource(order = {}) {
     createdDate: order.createdDate || "",
     paymentStatus: order.paymentStatus || "",
     fulfillmentStatus: order.fulfillmentStatus || "",
-    orderStatus: order.status || ""
+    orderStatus: order.status || "",
+    fulfillmentMethod: fulfillment.fulfillmentMethod,
+    shippingTitle: fulfillment.shippingTitle,
+    pickupMethod: fulfillment.pickupMethod,
+    pickupAddress: formatWixAddress(fulfillment.pickupAddress)
   };
 }
 
@@ -2341,6 +2408,40 @@ function updateWixTripSource(trip, order) {
   const changed = Object.entries(nextSource).some(([key, value]) => previousSource[key] !== value);
   trip.source = { ...previousSource, ...nextSource };
   return changed;
+}
+
+function reconcileWixFulfillment(trip, delivery = {}) {
+  // Never rewrite delivered work, recorded mileage, active routes or proof.
+  if (trip.startedAt || trip.proof || trip.submittedAt || trip.distanceKm > 0
+    || !["queued", "pickup", "store-sale", "order-review"].includes(trip.status)) return false;
+  const method = fulfillmentMethodForTrip(trip);
+  if (method === "delivery" && ["pickup", "store-sale", "order-review"].includes(trip.status)) {
+    trip.fulfillmentHistory = [...(trip.fulfillmentHistory || []), { recordedAt: nowIso(), previousStatus: trip.status,
+      method, reason: trip.source?.fulfillmentOverride ? "Dispatcher selected delivery" : "Wix now supplies delivery details" }];
+    trip.status = "queued";
+    trip.fulfillmentType = "my-driver";
+    trip.pickup = delivery.pickup || trip.pickup;
+    trip.destination = delivery.destination || trip.destination;
+    trip.stops = buildRouteStops(trip.pickup, trip.destination, []);
+    trip.shareToken = makeToken();
+    syncTrackingStops(trip);
+    return true;
+  }
+  if (!isNonDeliveryOrder({ source: trip.source })) return false;
+  const status = ({ "customer-pickup": "pickup", "in-store": "store-sale", "needs-details": "order-review", "carrier-shipping": "order-review", "fulfillment-review": "order-review" })[method];
+  if (trip.status === status && !trip.driverId && trip.fulfillmentType === method) return false;
+  trip.fulfillmentHistory = [...(trip.fulfillmentHistory || []), {
+    recordedAt: nowIso(), previousStatus: trip.status, previousDriverId: trip.driverId || "",
+    previousPickup: trip.pickup, previousDestination: trip.destination, method, reason: "Wix fulfillment method"
+  }];
+  trip.status = status;
+  trip.driverId = "";
+  trip.fulfillmentType = method;
+  trip.kmRate = 0;
+  trip.stops = [];
+  trip.shareToken = "";
+  trip.trackingStops = [];
+  return true;
 }
 
 function updateQueuedWixTripPickup(trip, pickup) {
@@ -2383,42 +2484,12 @@ function wixOrderToTrip(order, config, env) {
     importedAt: nowIso(),
     source: wixOrderSource(order)
   };
+  reconcileWixFulfillment(trip);
   syncTrackingStops(trip);
   return trip;
 }
 
-async function wixSearchOrders(config) {
-  if (!config.configured) {
-    throw new Error("Wix sync needs WIX_API_KEY and WIX_SITE_ID configured in production environment variables.");
-  }
-  const since = new Date(Date.now() - config.lookbackDays * 86400000).toISOString();
-  const response = await fetch("https://www.wixapis.com/ecom/v1/orders/search", {
-    method: "POST",
-    headers: {
-      "Authorization": config.authorization,
-      "Content-Type": "application/json",
-      "wix-site-id": config.siteId
-    },
-    body: JSON.stringify({
-      search: {
-        filter: {
-          status: { "$in": config.orderStatuses },
-          paymentStatus: { "$in": config.paymentStatuses },
-          fulfillmentStatus: { "$in": config.fulfillmentStatuses },
-          createdDate: { "$gte": since }
-        },
-        sort: [{ fieldName: "createdDate", order: "DESC" }],
-        cursorPaging: { limit: config.limit }
-      }
-    })
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = payload.message || payload.error?.message || response.statusText || "Wix order sync failed.";
-    throw new Error(`Wix ${response.status}: ${message}`);
-  }
-  return Array.isArray(payload.orders) ? payload.orders : [];
-}
+async function wixSearchOrders(config) { return searchWixOrders(config); }
 
 async function syncWixOrders(db, env) {
   const config = wixConfig(env);
@@ -2442,8 +2513,9 @@ async function syncWixOrders(db, env) {
     const existingTrip = tripsByWixOrderId.get(order.id);
     if (existingTrip) {
       const sourceChanged = updateWixTripSource(existingTrip, order);
+      const fulfillmentChanged = reconcileWixFulfillment(existingTrip, { pickup: config.pickupLabel, destination: formatWixAddress(wixOrderAddress(order)) });
       const pickupChanged = updateQueuedWixTripPickup(existingTrip, config.pickupLabel);
-      if (sourceChanged || pickupChanged) updated += 1;
+      if (sourceChanged || pickupChanged || fulfillmentChanged) updated += 1;
       else skipped += 1;
       importedIds.add(order.id);
       continue;
@@ -2557,7 +2629,7 @@ function integrationsStatus(db, env) {
       managedByEnvironment: true
     });
   }
-  return { connections };
+  return { connections, apiKeys:(db.integrations?.apiKeys || []).map(publicApiKey) };
 }
 
 function normalizedAddress(address = {}) {
@@ -2633,8 +2705,9 @@ function channelOrderToTrip(order, connection, env) {
     fulfillmentType: "my-driver", priority: "standard", deliveryWindowStart: null, deliveryWindowEnd: null,
     shareToken: makeToken(), startedAt: null, endedAt: null, submittedAt: null, reviewedAt: null, approvalNotes: "", notes,
     path: [], location: null, distanceKm: 0, importedAt: nowIso(),
-    source: { system: provider, connectionId: connection.id, orderId: order.id, orderNumber: String(order.number || ""), createdDate: order.createdAt || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.orderStatus || "" }
+    source: { system: provider, connectionId: connection.id, orderId: order.id, orderNumber: String(order.number || ""), createdDate: order.createdAt || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.orderStatus || "", ...(provider === "wix" ? { fulfillmentMethod: order.fulfillmentMethod, shippingTitle: order.shippingTitle, pickupMethod: order.pickupMethod, pickupAddress: order.pickupAddress } : {}) }
   };
+  if (provider === "wix") reconcileWixFulfillment(trip);
   syncTrackingStops(trip);
   return trip;
 }
@@ -2648,8 +2721,11 @@ function upsertChannelOrders(db, connection, orders, env) {
     if (!order.id) { skipped += 1; continue; }
     const prior = existing.get(String(order.id));
     if (prior) {
-      const nextSource = { ...prior.source, orderNumber: String(order.number || ""), createdDate: order.createdAt || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.orderStatus || "" };
-      if (JSON.stringify(nextSource) !== JSON.stringify(prior.source)) { prior.source = nextSource; updated += 1; }
+      const nextSource = { ...prior.source, orderNumber: String(order.number || ""), createdDate: order.createdAt || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.orderStatus || "", ...(connection.provider === "wix" ? { fulfillmentMethod: order.fulfillmentMethod, shippingTitle: order.shippingTitle, pickupMethod: order.pickupMethod, pickupAddress: order.pickupAddress } : {}) };
+      const sourceChanged = JSON.stringify(nextSource) !== JSON.stringify(prior.source);
+      prior.source = nextSource;
+      const fulfillmentChanged = connection.provider === "wix" && reconcileWixFulfillment(prior, { pickup: connection.pickupLabel, destination: order.destination });
+      if (sourceChanged || fulfillmentChanged) { updated += 1; }
       else skipped += 1;
       continue;
     }
@@ -2679,8 +2755,8 @@ async function fetchConnectionOrders(connection, credentials) {
     return (Array.isArray(payload) ? payload : []).filter((order) => ["processing", "on-hold", "completed"].includes(order.status)).map(normalizeWooOrder);
   }
   if (connection.provider === "wix") {
-    const config = { configured: true, siteId: credentials.siteId, authorization: credentials.apiKey.startsWith("Bearer ") ? credentials.apiKey : credentials.apiKey, orderStatuses: ["APPROVED"], paymentStatuses: ["PAID"], fulfillmentStatuses: ["NOT_FULFILLED", "PARTIALLY_FULFILLED", "FULFILLED"], lookbackDays: 14, limit: 100, pickupLabel: connection.pickupLabel };
-    return (await wixSearchOrders(config)).map((order) => ({ id: String(order.id || ""), number: order.number || order.id || "", customerName: wixOrderCustomerName(order), destination: formatWixAddress(wixOrderAddress(order)), phone: wixOrderContact(order).phone || wixOrderContact(order).phoneNumber || "", items: normalizedLineItems(order.lineItems), createdAt: order.createdDate || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.status || "" }));
+    const config = { configured: true, siteId: credentials.siteId, authorization: credentials.apiKey.startsWith("Bearer ") ? credentials.apiKey : credentials.apiKey, orderStatuses: ["APPROVED"], paymentStatuses: ["PAID"], fulfillmentStatuses: ["NOT_FULFILLED", "PARTIALLY_FULFILLED", "FULFILLED"], lookbackDays: 1, limit: 100, pickupLabel: connection.pickupLabel };
+    return (await wixSearchOrders(config)).map((order) => ({ id: String(order.id || ""), number: order.number || order.id || "", customerName: wixOrderCustomerName(order), destination: formatWixAddress(wixOrderAddress(order)), phone: wixOrderContact(order).phone || wixOrderContact(order).phoneNumber || "", items: normalizedLineItems(order.lineItems), createdAt: order.createdDate || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.status || "", ...wixOrderSource(order) }));
   }
   throw new Error("Webhook connections receive orders automatically and do not need manual sync.");
 }
@@ -2695,9 +2771,113 @@ async function syncConnection(db, env, connection) {
 }
 
 async function handleApi(request, env, url) {
+  if (request.method === "POST" && url.pathname === "/api/auth/register") {
+    const body = await readBody(request);
+    const attemptKey = loginAttemptKey(request, "workspace-registration");
+    if (loginRetryAfterSeconds(attemptKey)) return authJson({error:"Too many attempts. Try again in a few minutes."},429);
+    recordLoginFailure(attemptKey);
+    const email = normalizeEmail(body.email);
+    const name = String(body.name || "").trim();
+    const companyName = String(body.companyName || "").trim();
+    const password = String(body.password || "");
+    const timeZone = String(body.timeZone || "America/Toronto");
+    if (!validEmail(email) || email.length > 254) return badRequest("Enter a valid email address.");
+    if (!name || name.length > 120 || companyName.length < 2 || companyName.length > 120) return badRequest("Enter your name and company name.");
+    if (password.length < 8 || password.length > 256) return badRequest("Use a password between 8 and 256 characters.");
+    try { new Intl.DateTimeFormat("en", {timeZone}); } catch { return badRequest("Choose a valid time zone."); }
+    const primary = await readDb({...env,RIVO_STATE_KEY:"primary"});
+    if (normalizeEmail(primary.ownerAccount?.username) === email || primary.drivers.some(driver=>normalizeEmail(driver.email) === email)) return badRequest("An account already exists. Sign in instead.");
+    const key = `ws_${crypto.randomUUID().replaceAll("-","")}`;
+    await ensureWorkspaceDirectory(env);
+    if (env.DB) {
+      const reserved = await env.DB.prepare('INSERT INTO rivo_workspace_accounts (email,state_key,created_at) VALUES (?,?,?) ON CONFLICT(email) DO NOTHING').bind(email,key,nowIso()).run();
+      if (Number(reserved.meta?.changes || 0) !== 1) return authJson({error:"An account already exists. Sign in instead."},409);
+    } else {
+      globalThis.__rivoAccounts ||= new Map();
+      if (globalThis.__rivoAccounts.has(email)) return authJson({error:"An account already exists. Sign in instead."},409);
+      globalThis.__rivoAccounts.set(email,key);
+    }
+    const db = seededDb();
+    const scopedEnv = {...env,RIVO_STATE_KEY:key};
+    db.company = {...db.company,workspaceKey:key,name:companyName,timeZone,supportEmail:email,subscriptionStatus:"evaluation",evaluationStartedAt:nowIso(),evaluationEndsAt:new Date(Date.now()+7*86400000).toISOString(),billingMode:"manual-invoice"};
+    db.ownerAccount = {username:email,name,createdAt:nowIso(),updatedAt:nowIso()};
+    await setPassword(db.ownerAccount,password);
+    const nextSession = createSession(db,{role:"dispatcher",name,accountKey:`dispatcher:${email}`});
+    try { await writeDb(db,scopedEnv); } catch(error) {
+      if(env.DB && !db.__persistedUpdatedAt) await env.DB.prepare('DELETE FROM rivo_workspace_accounts WHERE email = ? AND state_key = ?').bind(email,key).run().catch(()=>{});
+      throw error;
+    }
+    return authJson({session:publicSession(nextSession,db),snapshot:snapshot(db,scopedEnv)},201,{"Set-Cookie":sessionCookie(nextSession.token)});
+  }
   const db = await readDb(env);
   const method = request.method || "GET";
   const session = sessionFromRequest(request, db, url);
+  Object.defineProperty(db,"__assignmentBefore",{value:assignmentBaseline(db.trips),writable:true,configurable:true});
+  Object.defineProperty(db,"__assignmentActor",{value:session?.role || "",writable:true,configurable:true});
+  const apiResponse = await handlePublicApi({request,url,db,session,readBody,json:sendJson,hash:tokenHash,equal:constantTimeEqual,token:makeToken,scoped:scopedToken,id:makeId,
+    save:async()=>{await writeDb(db,env);broadcastSnapshot(db,env);},
+    createOrder:body=>channelOrderToTrip({id:body.externalId.trim(),number:body.externalId.trim(),customerName:body.customerName.trim(),destination:body.destination.trim(),phone:(body.phone || '').trim(),createdAt:nowIso()}, {id:'public-api',provider:'api',pickupLabel:body.pickup.trim()}, env),
+    updateOrder:(order,body)=>{for(const field of ['customerName','pickup','destination']) if(field in body) order[field]=body[field].trim(); if('phone' in body) order.customerPhone=body.phone.trim(); order.stops=buildRouteStops(order.pickup,order.destination,[]);syncTrackingStops(order);}
+  });
+  if (apiResponse) return apiResponse;
+  if (url.pathname.startsWith("/api/assignment-notifications")) {
+    if (session?.role !== "driver") return unauthorized("Driver login required.");
+    if (method === "POST") {
+      const origin = request.headers.get("origin");
+      if (origin && origin !== url.origin) return unauthorized("Use your signed-in Rivo app.");
+      const body = await readBody(request);
+      if (url.pathname === "/api/assignment-notifications/subscribe") {
+        if (!pushConfigured(env)) return sendJson({error:"Push alerts are not configured yet."},503);
+        let subscription;
+        try {subscription=validatedPushSubscription(body.subscription);} catch {return badRequest("Invalid push subscription.");}
+        db.pushSubscriptions ||= [];
+        const existing = db.pushSubscriptions.find(item=>item.subscription.endpoint === subscription.endpoint);
+        if (existing && existing.driverId !== session.driverId && !existing.disabledAt) return badRequest("Disable alerts for the previous driver on this device first.");
+        const device={driverId:session.driverId,sessionToken:session.token,sessionExpiresAt:session.expiresAt,subscription,disabledAt:null,updatedAt:nowIso()};
+        if (existing) Object.assign(existing,device);
+        else {if (db.pushSubscriptions.filter(item=>item.driverId === session.driverId && !item.disabledAt).length>=5) return badRequest("Disable alerts on an old device first.");db.pushSubscriptions.push(device);}
+      } else if (url.pathname === "/api/assignment-notifications/unsubscribe") {
+        for (const item of db.pushSubscriptions || []) if (item.driverId === session.driverId && item.subscription.endpoint === body.endpoint) item.disabledAt=nowIso();
+      } else if (url.pathname === "/api/assignment-notifications/read") {
+        const ids = new Set(Array.isArray(body.ids)?body.ids.map(String):[]);
+        for (const item of db.assignmentNotifications || []) if (item.driverId === session.driverId && ids.has(item.id)) item.readAt=nowIso();
+      } else if (url.pathname === "/api/assignment-notifications/test") {
+        const driver=driverById(db,session.driverId);
+        if (Date.now()-Date.parse(driver.lastPushTestAt || "")<30000) return sendJson({error:"Wait 30 seconds before another test."},429);
+        driver.lastPushTestAt=nowIso();
+        await writeDb(db,env);
+        const test={id:makeId("push-test"),driverId:driver.id,tripIds:[],test:true};
+        await deliverAssignmentPush(db,env,[test]);
+        await writeDb(db,env).catch(()=>{});
+        return sendJson({accepted:test.pushStatus === "accepted",status:test.pushStatus});
+      } else return notFound();
+      await writeDb(db,env);
+      return sendJson({snapshot:driverSnapshot(db,env,session.driverId)});
+    }
+    return notFound();
+  }
+  const mileageResponse = await handleMileage({ request, url, db, session, isDispatcher,
+    save: async () => { await writeDb(db, env); broadcastSnapshot(db, env); },
+    prepareLive: driverId => prepareAutomaticStops(db, driverId, env),
+    onLive: (driverId, point) => {
+      const active = db.trips.filter(t => t.driverId === driverId && t.status === "active" && !isNonDeliveryOrder(t)).sort((a, b) => Number(a.routeSequence || 0) - Number(b.routeSequence || 0));
+      const trip = active[0];
+      if (!trip || trip.location?.timestamp && trip.location.timestamp >= point.timestamp) return;
+      const previous = trip.path?.at(-1);
+      const delta = previous && new Date(point.timestamp) - new Date(previous.timestamp) < 300000 ? haversineKm(previous, point) : 0;
+      trip.path ||= [];
+      if (!previous || delta >= 0.01) { trip.path.push(point); trip.distanceKm = Number(((trip.distanceKm || 0) + delta).toFixed(2)); }
+      for (const t of active) { if (t.id === trip.id || trip.routeId && t.routeId === trip.routeId) { t.location = point; t.routeCurrentTripId = trip.id; } }
+      const driver = db.drivers.find(d => d.id === driverId);
+      if (driver) { driver.lastSeenAt = point.timestamp; driver.status = "en-route"; }
+      const completed = detectAutomaticCompletion(db, driverId, point);
+      if (completed) {
+        if (driver) driver.status = calcDriverStatus(db, driver.id);
+        broadcastCustomerTripUpdates(db, completed);
+      }
+    }
+  });
+  if (mileageResponse) return mileageResponse;
 
   if (method === "GET" && url.pathname === "/api/health") {
     return sendJson({ ok: true, service: "Rivo", time: nowIso() });
@@ -2847,7 +3027,7 @@ async function handleApi(request, env, url) {
       supportEmail,
       subscriptionStatus: "evaluation",
       evaluationStartedAt,
-      evaluationEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      evaluationEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       billingMode: "manual-invoice"
     };
     const ownerAccount = {
@@ -2858,12 +3038,12 @@ async function handleApi(request, env, url) {
     };
     await setPassword(ownerAccount, password);
     db.ownerAccount = ownerAccount;
-    const nextSession = createSession(db, { role: "dispatcher", name });
+    const nextSession = createSession(db, { role: "dispatcher", name, accountKey: `dispatcher:${username}` });
     await writeDb(db, env);
     const nextSnapshot = snapshot(db, env);
     broadcastSnapshot(db, env);
     return authJson({
-      session: publicSession(nextSession),
+      session: publicSession(nextSession, db),
       snapshot: nextSnapshot
     }, 201, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
@@ -2895,7 +3075,7 @@ async function handleApi(request, env, url) {
     }
     loginAttempts.delete(attemptKey);
     const nextSession = createSession(db, user);
-    const driver = user.driverId ? driverById(db, user.driverId) : null;
+    const driver = driverById(db, personalMileageDriverId(db, nextSession));
     if (driver) {
       driver.lastSeenAt = nowIso();
       driver.status = calcDriverStatus(db, driver.id);
@@ -2906,7 +3086,7 @@ async function handleApi(request, env, url) {
       : snapshot(db, env);
     broadcastSnapshot(db, env);
     return authJson({
-      session: publicSession(nextSession),
+      session: publicSession(nextSession, db),
       snapshot: nextSnapshot
     }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
@@ -2933,11 +3113,11 @@ async function handleApi(request, env, url) {
     db.ownerAccount.updatedAt = nowIso();
     db.sessions = (db.sessions || []).filter((item) => item.role !== "dispatcher");
     loginAttempts.delete(attemptKey);
-    const nextSession = createSession(db, { role: "dispatcher", name: db.ownerAccount.name || "Owner" });
+    const nextSession = createSession(db, { role: "dispatcher", name: db.ownerAccount.name || "Owner", accountKey: `dispatcher:${String(db.ownerAccount.username).trim().toLowerCase()}` });
     await writeDb(db, env);
     const nextSnapshot = snapshot(db, env);
     broadcastSnapshot(db, env);
-    return authJson({ session: publicSession(nextSession), snapshot: nextSnapshot }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
+    return authJson({ session: publicSession(nextSession, db), snapshot: nextSnapshot }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
 
   if (method === "GET" && url.pathname === "/api/auth/invite") {
@@ -2973,14 +3153,47 @@ async function handleApi(request, env, url) {
     driver.status = calcDriverStatus(db, driver.id);
     await writeDb(db, env);
     return authJson({
-      session: publicSession(nextSession),
+      session: publicSession(nextSession, db),
       snapshot: driverSnapshot(db, env, driver.id)
     }, 200, { "Set-Cookie": sessionCookie(nextSession.token) });
   }
 
+  // Initiation only: fulfillment is a separately verified privacy operation.
+  // Never report account/data deletion merely because this request was saved.
+  if (url.pathname === "/api/account/deletion-request") {
+    if (!session || !["driver", "dispatcher"].includes(session.role)) return unauthorized();
+    const subjectKey = session.role === "driver" ? `driver:${session.driverId}` : session.accountKey;
+    if (!subjectKey) return unauthorized();
+    const existing = (db.accountDeletionRequests || []).find(item => item.subjectKey === subjectKey && item.status === "pending");
+    const publicRequest = item => item ? {id:item.id,status:item.status,requestedAt:item.requestedAt} : null;
+    if (method === "GET") return authJson({request:publicRequest(existing)});
+    if (method !== "POST") return sendJson({error:"Method not allowed."},405,{Allow:"GET, POST"});
+    const body = await readBody(request);
+    if (body.confirmation !== "DELETE" || typeof body.password !== "string" || !body.password || body.password.length > 1024) return badRequest("Enter your current password and confirm DELETE.");
+    const attemptKey = loginAttemptKey(request, `deletion:${subjectKey}`);
+    const retryAfter = loginRetryAfterSeconds(attemptKey);
+    if (retryAfter) return authJson({error:"Too many attempts. Try again later."},429,{"Retry-After":String(retryAfter)});
+    const account = session.role === "driver" ? driverById(db,session.driverId) : db.ownerAccount;
+    const legacy = session.role === "dispatcher" ? dispatcherCredentials(env) : null;
+    const matches = session.role === "dispatcher" && subjectKey !== `dispatcher:${normalizeEmail(account?.username)}`
+      ? Boolean(legacy && subjectKey === `dispatcher:${legacy.username}` && constantTimeEqual(body.password,legacy.password))
+      : await passwordMatches(account,body.password);
+    if (!matches) {recordLoginFailure(attemptKey);return authJson({error:"Current password is incorrect."},401);}
+    loginAttempts.delete(attemptKey);
+    if (existing) return authJson({request:publicRequest(existing)},200);
+    const item = {id:makeId("privacy"),subjectKey,role:session.role,driverId:session.driverId || null,requestedAt:nowIso(),status:"pending"};
+    db.accountDeletionRequests ||= [];
+    db.accountDeletionRequests.push(item);
+    await writeDb(db,env);
+    return authJson({request:publicRequest(item)},201);
+  }
+
   if (method === "POST" && url.pathname === "/api/auth/logout") {
     if (!session) return authJson({ ok: true }, 200, { "Set-Cookie": expiredSessionCookie() });
+    const mileageState = db.mileageTracking?.[personalMileageDriverId(db, session)];
+    if (mileageState) { finishTrip(db, mileageState, "Signed out; check endpoints"); mileageState.signedOutAt = nowIso(); }
     db.sessions = (db.sessions || []).filter((item) => item.token !== session.token);
+    for (const item of db.pushSubscriptions || []) if (item.sessionToken === session.token) item.disabledAt=nowIso();
     await writeDb(db, env);
     return authJson({ ok: true }, 200, { "Set-Cookie": expiredSessionCookie() });
   }
@@ -2990,7 +3203,37 @@ async function handleApi(request, env, url) {
     const nextSnapshot = session.role === "driver"
       ? driverSnapshot(db, env, session.driverId)
       : snapshot(db, env);
-    return authJson({ session: publicSession(session), snapshot: nextSnapshot }, 200, { "Set-Cookie": sessionCookie(session.token) });
+    const ownDriverId = personalMileageDriverId(db, session);
+    if (ownDriverId) nextSnapshot.myMileage = mileageSnapshot(db, ownDriverId);
+    return authJson({ session: publicSession(session, db), snapshot: nextSnapshot }, 200, { "Set-Cookie": sessionCookie(session.token) });
+  }
+
+  if (method === "POST" && url.pathname === "/api/me/driver-profile") {
+    if (!isDispatcher(session)) return unauthorized("Sign in with your dispatcher account.");
+    if (!session.accountKey) return sendJson({ error: "Sign out and sign in once to securely link your driver profile.", code: "reauth_required" }, 409);
+    const existingId = db.dispatcherDriverProfiles?.[session.accountKey];
+    if (existingId) {
+      const existing = driverById(db, existingId);
+      if (!existing) return sendJson({ error: "Your linked driver profile is archived. Restore it before recording mileage." }, 409);
+      return authJson({ driver: publicDriver(existing, { includeLogin: true }), session: publicSession(session, db), mileage: mileageSnapshot(db, existingId), snapshot: snapshot(db, env) });
+    }
+    const body = await readBody(request);
+    const name = String(body.name || "").trim().slice(0, 120);
+    if (name.length < 2) return badRequest("Enter your name.");
+    const rate = body.defaultRate === "" || body.defaultRate == null ? null : Number(body.defaultRate);
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) return badRequest("Enter a valid CAD per-kilometre rate, or leave it blank.");
+    const identifier = session.accountKey.slice("dispatcher:".length);
+    const email = validEmail(identifier) ? normalizeEmail(identifier) : "";
+    if (email && db.drivers.some(d => normalizeEmail(d.email) === email)) return sendJson({ error: "A separate driver already uses this email. No profile was linked; contact support to verify account ownership." }, 409);
+    const driver = { id: makeId("drv"), name, phone: "", email, loginId: "", usesDispatcherLogin: true,
+      homeAddress: "", vehicle: String(body.vehicle || "").trim().slice(0, 160), shift: "", defaultRate: rate,
+      capacity: 20, driverType: "my-driver", color: "#2563eb", status: "available", lastSeenAt: nowIso() };
+    db.drivers.push(driver);
+    db.dispatcherDriverProfiles ||= {};
+    db.dispatcherDriverProfiles[session.accountKey] = driver.id;
+    await writeDb(db, env);
+    broadcastSnapshot(db, env);
+    return authJson({ driver: publicDriver(driver, { includeLogin: true }), session: publicSession(session, db), mileage: mileageSnapshot(db, driver.id), snapshot: snapshot(db, env) }, 201);
   }
 
   if (method === "GET" && url.pathname === "/api/maps/config") {
@@ -3052,7 +3295,8 @@ async function handleApi(request, env, url) {
         deliveryZones: String(body.deliveryZones || "").trim(),
         defaultWindowMinutes,
         requirePhoto: body.requirePhoto === true || body.requirePhoto === "on",
-        requireSignature: body.requireSignature === true || body.requireSignature === "on"
+        requireSignature: body.requireSignature === true || body.requireSignature === "on",
+        autoComplete: body.autoComplete === true || body.autoComplete === "on"
       },
       notifications: {
         customerTracking: body.customerTracking === true || body.customerTracking === "on",
@@ -3144,7 +3388,7 @@ async function handleApi(request, env, url) {
       credentials.apiKey = String(body.apiKey || "").trim();
       if (!credentials.siteId || credentials.apiKey.length < 10) return badRequest("Enter the Wix site ID and API key.");
     } else {
-      webhookToken = makeToken(32);
+      webhookToken = scopedToken(db, makeToken(32));
       connection.webhookTokenHash = await tokenHash(webhookToken);
     }
     connection.credentials = await encryptIntegrationCredentials(env, credentials);
@@ -3294,7 +3538,7 @@ async function handleApi(request, env, url) {
     const partner = courierPartnerById(db, String(body.courierPartnerId || ""));
     if (!partner || partner.active === false) return badRequest("Choose an active courier partner.");
     const sourceTrips = tripIds.map((tripId) => db.trips.find((trip) => trip.id === tripId));
-    if (sourceTrips.some((trip) => !trip || !["queued", "completed", "exception"].includes(trip.status))) {
+    if (sourceTrips.some((trip) => !trip || isNonDeliveryOrder(trip) || !["queued", "completed", "exception"].includes(trip.status))) {
       return badRequest("Every selected order must be queued, needs review, or needs attention.");
     }
     if (sourceTrips.some((trip) => openCourierRequestForTrip(db, trip.id))) {
@@ -3440,7 +3684,7 @@ async function handleApi(request, env, url) {
   if (method === "POST" && url.pathname === "/api/drivers") {
     if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
     const body = await readBody(request);
-    if (!body.name || !body.vehicle) return badRequest("Driver name and vehicle are required.");
+    if (!String(body.name || "").trim()) return badRequest("Driver name is required.");
     const email = normalizeEmail(body.email);
     if (!validEmail(email)) return badRequest("A valid driver email is required.");
     if (db.drivers.some((item) => normalizeEmail(item.email) === email)) {
@@ -3454,10 +3698,10 @@ async function handleApi(request, env, url) {
       phone: String(body.phone || "").trim(),
       email,
       homeAddress: String(body.homeAddress || "").trim(),
-      vehicle: String(body.vehicle).trim(),
+      vehicle: String(body.vehicle || "").trim(),
       shift: String(body.shift || "").trim(),
       loginId: email,
-      defaultRate: Number(body.defaultRate || 1),
+      defaultRate: Number(body.defaultRate || 0),
       capacity,
       driverType: "my-driver",
       color: body.color || "#2563eb",
@@ -3482,6 +3726,7 @@ async function handleApi(request, env, url) {
     if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
     const driver = db.drivers.find((item) => item.id === driverInvite[1] && !item.archivedAt);
     if (!driver) return notFound();
+    if (driver.usesDispatcherLogin) return badRequest("This driver uses their existing dispatcher login; no invitation is needed.");
     if (!validEmail(driver.email)) return badRequest("This driver needs a valid email address before an invitation can be created.");
     const invitation = await persistAndDeliverDriverInvitation(db, env, driver, url.origin);
     const nextSnapshot = snapshot(invitation.db, env);
@@ -3501,11 +3746,12 @@ async function handleApi(request, env, url) {
     const body = await readBody(request);
     const driver = db.drivers.find((item) => item.id === driverPatch[1] && !item.archivedAt);
     if (!driver) return notFound();
+    if (driver.usesDispatcherLogin && ((body.email !== undefined && normalizeEmail(body.email) !== normalizeEmail(driver.email)) || (body.loginId !== undefined && body.loginId !== driver.loginId) || body.password)) return badRequest("This profile uses the existing dispatcher login. Its sign-in cannot be changed through driver editing.");
     for (const key of ["name", "phone", "vehicle", "shift", "color", "homeAddress"]) {
       if (body[key] !== undefined) driver[key] = String(body[key]).trim();
     }
     let identityChanged = false;
-    if (body.email !== undefined) {
+    if (body.email !== undefined && !driver.usesDispatcherLogin) {
       const email = normalizeEmail(body.email);
       if (!validEmail(email)) return badRequest("Enter a valid driver email address.");
       if (db.drivers.some((item) => item.id !== driver.id && normalizeEmail(item.email) === email)) {
@@ -3515,7 +3761,7 @@ async function handleApi(request, env, url) {
       driver.email = email;
       driver.loginId = email;
     }
-    if (body.loginId !== undefined) {
+    if (body.loginId !== undefined && !driver.usesDispatcherLogin) {
       const loginId = String(body.loginId).trim().toLowerCase();
       if (loginId.length < 3) return badRequest("Driver username must be at least 3 characters.");
       driver.loginId = loginId;
@@ -3525,7 +3771,11 @@ async function handleApi(request, env, url) {
       if (password.length < 8) return badRequest("Driver password must be at least 8 characters.");
       await setPassword(driver, password);
     }
-    if (body.defaultRate !== undefined) driver.defaultRate = Number(body.defaultRate);
+    if (body.defaultRate !== undefined) {
+      const rate = body.defaultRate === "" || body.defaultRate === null ? null : Number(body.defaultRate);
+      if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) return badRequest("Enter a valid CAD per-kilometre rate.");
+      driver.defaultRate = rate;
+    }
     if (body.capacity !== undefined) {
       const capacity = Number(body.capacity);
       if (!Number.isInteger(capacity) || capacity < 1 || capacity > 100) return badRequest("Driver capacity must be between 1 and 100 stops.");
@@ -3816,6 +4066,58 @@ async function handleApi(request, env, url) {
     return sendJson({ assigned: appliedTrips.length, optimizedRoutes, plan, snapshot: nextSnapshot }, 201);
   }
 
+  if (method === "POST" && url.pathname === "/api/routes/preview") {
+    if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const body = await readBody(request);
+    const tripIds = Array.isArray(body.tripIds) ? [...new Set(body.tripIds.map(String))] : [];
+    if (!tripIds.length || tripIds.length > 25) return badRequest("Select between 1 and 25 orders for a Google route.");
+    const trips = tripIds.map(id => db.trips.find(trip => trip.id === id));
+    if (trips.some(trip => !trip || isNonDeliveryOrder(trip) || trip.status !== "queued" || openCourierRequestForTrip(db, trip.id))) return badRequest("Select queued delivery orders without an open courier request. Customer pickups cannot be routed.");
+    const driver = db.drivers.find(item => item.id === body.driverId && !item.archivedAt);
+    if (body.driverId && !driver) return badRequest("Choose a valid driver.");
+    const existing = driver ? activeRouteStateForDriver(db, driver.id) : { trips: [] };
+    if (existing.conflict) return badRequest("This driver has separate active routes. Finish or consolidate them first.");
+    const origin = String(body.origin || workspacePickupAddress(db) || trips[0].pickup || "").trim();
+    if (!origin || trips.some(trip => !String(trip.destination || "").trim())) return badRequest("Pickup and delivery addresses are required.");
+    const planningOrigin = existing.trips.at(-1)?.destination || origin;
+    const plan = await optimizedStopOrder(env, planningOrigin, trips.map(trip => trip.destination), origin);
+    return sendJson({ tripIds: plan.order.map(index => trips[index].id), origin: planningOrigin, returnAddress: origin, appendedToActiveRoute: Boolean(existing.trips.length), optimized: plan.optimized, distanceKm: plan.distanceKm, durationMinutes: plan.durationMinutes });
+  }
+
+  const fulfillmentMatch = url.pathname.match(/^\/api\/trips\/([^/]+)\/fulfillment$/);
+  if (method === "POST" && fulfillmentMatch) {
+    if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const trip = db.trips.find(item => item.id === fulfillmentMatch[1]);
+    if (!trip) return notFound();
+    if (trip.source?.system !== "wix" || trip.startedAt || trip.proof || trip.submittedAt || trip.distanceKm > 0
+      || !["queued", "pickup", "store-sale", "order-review"].includes(trip.status)) return badRequest("Only unstarted Wix orders can change fulfillment.");
+    if (openCourierRequestForTrip(db, trip.id)) return badRequest("Cancel the open courier request first.");
+    const body = await readBody(request);
+    const choice = String(body.fulfillmentMethod || "");
+    if (!["delivery", "customer-pickup"].includes(choice)) return badRequest("Choose pickup or delivery.");
+    const destination = String(body.destination || "").trim();
+    const pickup = String(workspacePickupAddress(db) || trip.pickup || "").trim();
+    if (choice === "delivery" && (!pickup || destination.length < 3 || destination.length > 1000
+      || destination === "Delivery address missing")) return badRequest("Enter a delivery address; a workspace pickup address is also required.");
+    trip.fulfillmentHistory = [...(trip.fulfillmentHistory || []), { recordedAt: nowIso(), recordedBy: session.name || "Dispatcher",
+      previousStatus: trip.status, previousMethod: fulfillmentMethodForTrip(trip), previousDriverId: trip.driverId,
+      previousDestination: trip.destination, method: choice, reason: "Dispatcher selected fulfillment" }];
+    trip.source.fulfillmentOverride = choice;
+    if (choice === "delivery") {
+      trip.pickup = pickup;
+      trip.destination = destination;
+      trip.stops = buildRouteStops(pickup, destination, []);
+      trip.status = "queued";
+      trip.fulfillmentType = "my-driver";
+      trip.shareToken ||= makeToken();
+      syncTrackingStops(trip);
+    } else reconcileWixFulfillment(trip);
+    await writeDb(db, env);
+    const nextSnapshot = snapshot(db, env);
+    broadcastSnapshot(db, env);
+    return sendJson({ trip: publicTrip(db, trip), snapshot: nextSnapshot });
+  }
+
   if (method === "POST" && url.pathname === "/api/routes/dispatch") {
     if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
     const body = await readBody(request);
@@ -3823,12 +4125,14 @@ async function handleApi(request, env, url) {
     if (!tripIds.length) return badRequest("Select at least one order to dispatch.");
     const driver = db.drivers.find((item) => item.id === body.driverId && !item.archivedAt);
     if (!driver) return badRequest("A valid driver is required.");
+    const kmRate = Number(body.kmRate ?? driver.defaultRate ?? 1);
+    if (!Number.isFinite(kmRate) || kmRate < 0) return badRequest("Enter a valid non-negative driver rate.");
     const existingDriverRoute = activeRouteStateForDriver(db, driver.id);
     if (existingDriverRoute.conflict) {
       return badRequest("This driver has separate active routes. Finish or consolidate them before dispatching more work.");
     }
     const sourceTrips = tripIds.map((id) => db.trips.find((item) => item.id === id));
-    if (sourceTrips.some((trip) => !trip || !["queued", "completed", "exception"].includes(trip.status))) {
+    if (sourceTrips.some((trip) => !trip || isNonDeliveryOrder(trip) || !["queued", "completed", "exception"].includes(trip.status))) {
       return badRequest("Every selected order must be ready to dispatch.");
     }
     if (sourceTrips.some((trip) => openCourierRequestForTrip(db, trip.id))) {
@@ -3840,13 +4144,15 @@ async function handleApi(request, env, url) {
     const destinations = trips.map((trip) => String(trip.destination || "").trim());
     if (destinations.some((address) => !address)) return badRequest("Every selected order needs a destination.");
     const planningOrigin = existingDriverRoute.trips.at(-1)?.destination || origin;
-    const routePlan = await optimizedStopOrder(env, planningOrigin, destinations);
+    const routePlan = body.preserveStopOrder === true
+      ? { order: trips.map((_, index) => index), optimized: false }
+      : await optimizedStopOrder(env, planningOrigin, destinations, origin);
     const startedAt = nowIso();
     const orderedTrips = routePlan.order.map((index) => trips[index]);
     orderedTrips.forEach((trip) => {
       resetTripForDispatch(trip);
       trip.driverId = driver.id;
-      trip.kmRate = Number(body.kmRate || driver.defaultRate || 1);
+      trip.kmRate = kmRate;
       trip.tripType = "business";
       trip.status = "active";
       trip.deliveryOutcomeStatus = "active";
@@ -3878,6 +4184,7 @@ async function handleApi(request, env, url) {
     if (!["assign", "complete", "delivered"].includes(action)) return badRequest("Choose a valid bulk action.");
     const trips = tripIds.map((id) => db.trips.find((item) => item.id === id));
     if (trips.some((trip) => !trip)) return badRequest("One or more selected deliveries no longer exist.");
+    if (trips.some(isNonDeliveryOrder)) return badRequest("Customer pickups and in-store orders are not driver deliveries.");
     const affectedDriverIds = new Set(trips.map((trip) => trip.driverId).filter(Boolean));
     const recordedAt = nowIso();
 
@@ -4082,6 +4389,7 @@ async function handleApi(request, env, url) {
     let trip = db.trips.find((item) => item.id === dispatchMatch[1]);
     if (!trip) return notFound();
     if (!["queued", "completed", "exception"].includes(trip.status)) return badRequest("Only queued, issue, or delivered imported orders can be dispatched.");
+    if (isNonDeliveryOrder(trip)) return badRequest("This Wix order is not a driver delivery.");
     if (openCourierRequestForTrip(db, trip.id)) return badRequest("Cancel the open courier request before dispatching this order to a driver.");
     const driver = db.drivers.find((item) => item.id === body.driverId && !item.archivedAt);
     if (!driver) return badRequest("A valid driver is required.");
@@ -4131,20 +4439,23 @@ async function handleApi(request, env, url) {
     const trip = db.trips.find((item) => item.id === locationMatch[1]);
     if (!trip) return notFound();
     if (trip.status !== "active") return badRequest("Only active trips can receive location updates.");
+    if (isNonDeliveryOrder(trip)) return badRequest("This order does not have a driver delivery.");
     if (!canAccessTrip(session, trip)) return unauthorized("This trip is not assigned to this login.");
     if (trip.routeId && currentRouteTripId(db, trip) !== trip.id) {
       return badRequest("Publish location from the current route stop before moving to a later stop.");
     }
     const lat = Number(body.lat);
     const lng = Number(body.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return badRequest("Latitude and longitude are required.");
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return badRequest("Valid latitude and longitude are required.");
+    const capturedAt = body.timestamp ? Date.parse(body.timestamp) : Date.now();
+    if (!Number.isFinite(capturedAt) || capturedAt > Date.now() + 60000 || Date.now() - capturedAt > 90000) return badRequest("Send a fresh GPS location.");
     const point = {
       lat,
       lng,
-      accuracy: Number.isFinite(Number(body.accuracy)) ? Number(body.accuracy) : null,
+      accuracy: body.accuracy != null && Number.isFinite(Number(body.accuracy)) ? Number(body.accuracy) : null,
       heading: Number.isFinite(Number(body.heading)) ? Number(body.heading) : null,
-      speed: Number.isFinite(Number(body.speed)) ? Number(body.speed) : null,
-      timestamp: nowIso()
+      speed: body.speed != null && Number.isFinite(Number(body.speed)) ? Number(body.speed) : null,
+      timestamp: new Date(capturedAt).toISOString()
     };
     const previous = trip.path.at(-1);
     const deltaKm = haversineKm(previous, point);
@@ -4165,6 +4476,11 @@ async function handleApi(request, env, url) {
     if (driver) {
       driver.status = "en-route";
       driver.lastSeenAt = point.timestamp;
+    }
+    // Browser simulations and dispatcher map updates must never close real orders.
+    if (session.role === "driver" && body.source !== "simulation") {
+      await prepareAutomaticStops(db, trip.driverId, env);
+      if (detectAutomaticCompletion(db, trip.driverId, point) && driver) driver.status = calcDriverStatus(db, driver.id);
     }
     await writeDb(db, env);
     const nextTrip = publicTrip(db, trip);
@@ -4281,7 +4597,12 @@ async function handleApi(request, env, url) {
     archiveTripProof(trip);
     trip.status = outcome.failed ? "failed" : outcome.exception ? "exception" : "completed";
     trip.deliveryOutcomeStatus = outcome.failed ? "failed" : outcome.exception ? "exception" : "delivered";
-    trip.endedAt = recordedAt;
+    const completedEarlier = isDispatcher(session) && body.completedEarlier === true;
+    trip.endedAt = completedEarlier ? null : recordedAt;
+    trip.completionRecordedAt = recordedAt;
+    trip.completionSource = completedEarlier ? "dispatcher-correction" : isDispatcher(session) ? "dispatcher" : "driver";
+    trip.completionTimeUnknown = completedEarlier;
+    trip.completionTimeEstimated = false;
     trip.tripType = "business";
     if (body.notes !== undefined) trip.notes = String(body.notes || "").trim();
     trip.proof = {
@@ -4294,7 +4615,7 @@ async function handleApi(request, env, url) {
       kind: outcome.override ? "dispatcher-override" : "customer-proof",
       overrideReason: outcome.override ? String(body.overrideReason || exceptionNote || "Dispatcher completed this delivery without driver proof.").trim() : "",
       media: trip.pendingProofMedia || {},
-      location: trip.location && isCurrentRouteStop
+      location: !completedEarlier && trip.location && isCurrentRouteStop
         ? {
             lat: trip.location.lat,
             lng: trip.location.lng,
@@ -4302,7 +4623,7 @@ async function handleApi(request, env, url) {
             timestamp: trip.location.timestamp || recordedAt
           }
         : null,
-      locationStatus: trip.location && !isCurrentRouteStop ? "omitted-non-current-route-stop" : trip.location ? "recorded" : "unavailable",
+      locationStatus: completedEarlier ? "unavailable-historical-correction" : trip.location && !isCurrentRouteStop ? "omitted-non-current-route-stop" : trip.location ? "recorded" : "unavailable",
       recordedAt,
       recordedBy: session.name || (session.role === "driver" ? "Driver" : "Dispatcher")
     };
@@ -4333,6 +4654,26 @@ async function handleApi(request, env, url) {
     broadcastCustomerTripUpdates(db, trip);
     broadcastSnapshot(db, env);
     return sendJson({ trip: publicTrip(db, trip), snapshot: nextSnapshot });
+  }
+
+  const reopenMatch = url.pathname.match(/^\/api\/trips\/([^/]+)\/undo-auto-completion$/);
+  if (method === "POST" && reopenMatch) {
+    if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const trip = db.trips.find(t => t.id === reopenMatch[1]);
+    if (!trip) return notFound();
+    if (trip.status !== "completed" || trip.completionSource !== "gps-detected") return badRequest("Only an unsubmitted GPS-detected completion can be undone.");
+    archiveTripProof(trip);
+    trip.completionCorrections ||= [];
+    trip.completionCorrections.push({ action: "undo-gps-completion", recordedAt: nowIso(), recordedBy: session.name, previousEndedAt: trip.endedAt });
+    delete trip.proof;
+    delete trip.autoDelivery;
+    trip.status = "active"; trip.deliveryOutcomeStatus = ""; trip.endedAt = null;
+    trip.completionSource = ""; trip.completionTimeEstimated = false;
+    const driver = db.drivers.find(d => d.id === trip.driverId);
+    if (driver) driver.status = calcDriverStatus(db, driver.id);
+    await writeDb(db, env);
+    broadcastCustomerTripUpdates(db, trip); broadcastSnapshot(db, env);
+    return sendJson({ trip: publicTrip(db, trip), snapshot: snapshot(db, env) });
   }
 
   const submitMatch = url.pathname.match(/^\/api\/trips\/([^/]+)\/submit$/);
@@ -4456,11 +4797,12 @@ function extension(pathname) {
 }
 
 function staticPath(pathname) {
+  if (pathname === "/signup") return "/index.html";
   if (pathname === "/") {
     return "/index.html";
   }
   if (pathname === "/favicon.ico") return "/assets/rova-mark.svg";
-  const appRoutes = new Set(["/dispatcher", "/login", "/operations", "/operations.html", "/contact.html", "/pricing.html", "/demo.html", "/industries.html", "/terms.html", "/privacy.html"]);
+  const appRoutes = new Set(["/dispatcher", "/login", "/operations", "/my-mileage", "/operations.html", "/contact.html", "/pricing.html", "/demo.html", "/industries.html", "/terms.html", "/privacy.html"]);
   if (appRoutes.has(pathname) || pathname === "/setup" || pathname.startsWith("/driver") || pathname.startsWith("/track") || pathname.startsWith("/join")) {
     return "/operations.html";
   }
@@ -4510,9 +4852,14 @@ export default {
     try {
       let response;
       if (url.pathname.startsWith("/api/")) {
+        if (unsafeBrowserWrite(request, url)) return withSecurityHeaders(sendJson({ error: "Use the signed-in Rivo app for this action." }, 403), url);
+        env = await scopeEnvironment(request, env, url);
         response = await handleApi(request, env, url);
       } else if (url.pathname === "/events") {
         response = sendJson({ error: "Live event streams have been replaced by polling." }, 410);
+      } else if (url.pathname === "/my-mileage") {
+        // Use the canonical app shell: the static host canonicalizes .html aliases.
+        response = new Response(null, { status: 302, headers: { Location: new URL("/?view=my-mileage", url).toString(), "Cache-Control": "no-store" } });
       } else if (url.pathname === "/robots.txt") {
         response = new Response("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
       } else {
@@ -4520,7 +4867,9 @@ export default {
       }
       return withSecurityHeaders(response, url);
     } catch (error) {
-      return withSecurityHeaders(sendJson({ error: error.message || "Server error" }, error?.code === "STATE_CONFLICT" ? 409 : 500), url);
+      const status = error?.code === "STATE_CONFLICT" ? 409 : [400, 404, 413].includes(error?.status) ? error.status : 500;
+      if (status === 500) console.error("Rivo request failed", { route: url.pathname, code: error?.code || "UNEXPECTED", name: error?.name || "Error" });
+      return withSecurityHeaders(sendJson({ error: status === 500 ? "Rivo could not finish this request. Please retry; if it continues, contact support." : error.message || "Request could not be completed." }, status), url);
     }
   }
 };
