@@ -3417,17 +3417,30 @@ async function handleApi(request, env, url) {
 
   if (method === "POST" && url.pathname === "/api/integrations/sync") {
     if (!isDispatcher(session)) return unauthorized("Dispatcher login required.");
+    const body = await readBody(request);
+    const automatic = body.automatic === true;
+    const due = (item) => {
+      const lastAttempt = Date.parse(item.lastSyncAttemptAt || item.lastSyncAt || "");
+      return !automatic || !Number.isFinite(lastAttempt) || Date.now() - lastAttempt >= 60000;
+    };
     const results = [];
+    let attempted = false;
     if (wixConfig(env).configured && !(db.integrations?.connections || []).some((item) => item.provider === "wix")) {
-      try { results.push({ id: "legacy-wix", provider: "wix", ...(await syncWixOrders(db, env)) }); }
-      catch (error) { db.wix.lastError = error.message || "Wix sync failed."; results.push({ id: "legacy-wix", provider: "wix", error: db.wix.lastError }); }
+      if (due(db.wix)) {
+        attempted = true;
+        db.wix.lastSyncAttemptAt = nowIso();
+        try { results.push({ id: "legacy-wix", provider: "wix", ...(await syncWixOrders(db, env)) }); }
+        catch (error) { db.wix.lastError = error.message || "Wix sync failed."; results.push({ id: "legacy-wix", provider: "wix", error: db.wix.lastError }); }
+      }
     }
     for (const connection of db.integrations.connections) {
-      if (connection.provider === "webhook") continue;
+      if (connection.provider === "webhook" || !due(connection)) continue;
+      attempted = true;
+      connection.lastSyncAttemptAt = nowIso();
       try { results.push({ id: connection.id, provider: connection.provider, ...(await syncConnection(db, env, connection)) }); }
       catch (error) { connection.lastError = error.message || `${providerLabel(connection.provider)} sync failed.`; results.push({ id: connection.id, provider: connection.provider, error: connection.lastError }); }
     }
-    await writeDb(db, env);
+    if (attempted) await writeDb(db, env);
     const nextSnapshot = snapshot(db, env);
     broadcastSnapshot(db, env);
     return sendJson({ results, snapshot: nextSnapshot });

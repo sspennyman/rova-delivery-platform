@@ -1,3 +1,4 @@
+import { createOrderAutoSync } from './order-auto-sync.js?v=105';
 import {outsideDailyOrderWindow} from './order-window.js?v=103';
 import { createMileageUI } from "./mileage.js?v=103";
 import { createAssignmentAlerts } from "./assignment-alerts.js?v=103";
@@ -1463,10 +1464,11 @@ function channelOrdersPanel(trips) {
         <div>
           <h2 class="panel-title">${history ? "Delivery history" : "Orders to dispatch"}</h2>
           <p class="panel-subtitle">${history ? "Past orders and completed deliveries. Original statuses and proof are preserved." : `${channelOrders.length} waiting for a route · Wix orders from the past 24 hours`}</p>
+          ${!history && connections.some(item => item.provider !== "webhook") ? '<p class="panel-subtitle">Auto-checks every minute while open and online · pauses while editing</p>' : ""}
         </div>
         <div class="item-actions">
           ${history ? "" : `<details class="bulk-more"><summary class="button ghost">Import & tools</summary><div class="bulk-more-menu">
-          <span class="item-detail">${h(connectedText)} · ${h(lastSync)}</span>
+          <span class="item-detail">${h(connectedText)} · ${h(lastSync)}</span><span class="item-detail">Checks every minute while this dashboard is open and online. Pauses while you edit.</span>
           ${dispatchQueue.length && getDrivers().some((driver) => driver.status !== "offline") ? `<button class="button secondary" data-action="auto-assign-orders" type="button">Balance orders ${dispatchQueue.length}</button>` : ""}
           <button class="button secondary" data-action="sync-channels">Sync orders</button>
           <button class="button ghost" data-action="dispatcher-view" data-view="channels">Connect a site</button></div></details>`}
@@ -2109,7 +2111,7 @@ function renderDriverInvite() {
           <p class="invite-card-copy">${profile ? `Create the password for <strong>${h(profile.email)}</strong>. This email becomes your Rivo sign-in.` : state.inviteError ? "This link cannot be used. It may have expired or already been replaced." : "Please wait while Rivo verifies your secure link."}</p>
           ${state.inviteError ? `
             <div class="inline-alert error"><strong>We couldn’t open this invitation.</strong><span>${h(state.inviteError)}</span></div>
-            <div class="invite-actions"><button class="button" data-action="show-login" type="button">Go to sign in</button><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Driver%20invitation%20help">Get help</a></div>` : ""}
+            <div class="invite-actions"><button class="button" data-action="show-login" type="button">Go to sign in</button><a class="button secondary" href="mailto:rivocanada@gmail.com?subject=Driver%20invitation%20help">Get help</a></div>` : ""}
           ${profile ? `
             ${state.inviteActionError ? `<div class="inline-alert error"><strong>Account not created.</strong><span>${h(state.inviteActionError)}</span></div>` : ""}
             <form id="accept-invite-form" class="form-grid invite-form">
@@ -2413,7 +2415,7 @@ function renderSettingsHtml() {
               <div class="field full"><label for="company-pickup">Primary pickup or depot</label><input class="input" id="company-pickup" name="pickupAddress" value="${h(company.pickupAddress || DEFAULT_PICKUP_ADDRESS)}" autocomplete="street-address" required></div>
               <div class="field"><label for="company-timezone">Time zone</label><select class="select" id="company-timezone" name="timeZone">${timeZones.map((zone) => `<option value="${h(zone)}"${zone === company.timeZone ? " selected" : ""}>${h(zone.replace("America/", "").replaceAll("_", " "))}</option>`).join("")}</select></div>
               <div class="field"><label for="company-currency">Currency</label><select class="select" id="company-currency" name="currency"><option value="CAD"${company.currency === "CAD" ? " selected" : ""}>CAD</option><option value="USD"${company.currency === "USD" ? " selected" : ""}>USD</option></select></div>
-              <div class="field full"><label for="company-support">Customer support email</label><input class="input" id="company-support" name="supportEmail" type="email" value="${h(company.supportEmail || "hello@floraljet.llc")}" required></div>
+              <div class="field full"><label for="company-support">Customer support email</label><input class="input" id="company-support" name="supportEmail" type="email" value="${h(company.supportEmail || "rivocanada@gmail.com")}" required></div>
               <fieldset class="settings-section full"><legend>Customer tracking brand</legend><div class="form-grid compact">
                 <div class="field"><label for="brand-colour">Primary colour</label><input class="input color-input" id="brand-colour" name="brandPrimaryColor" type="color" value="${h(branding.primaryColor || "#176b52")}"></div>
                 <div class="field"><label for="brand-logo">Logo URL</label><input class="input" id="brand-logo" name="logoUrl" type="url" placeholder="https://…" value="${h(branding.logoUrl || "")}"></div>
@@ -2441,16 +2443,16 @@ function renderSettingsHtml() {
         <div class="settings-stack">
           <div class="panel">
             <div class="panel-header"><div><p class="eyebrow">System configuration</p><h3 class="panel-title">${readiness.requiredReady ? "Core services configured" : "Setup needs attention"}</h3><p class="panel-subtitle">${h(readiness.readyCount)} of ${h(readiness.totalCount)} services configured—not an end-to-end launch certification.</p></div><span class="status-pill ${readiness.requiredReady ? "green" : "amber"}">${readiness.requiredReady ? "Configured" : "Review"}</span></div>
-            <div class="panel-body"><div class="accounts-checklist">${readiness.checks.map((check) => `<div><strong>${check.ready ? "✓" : "○"} ${h(check.label)}</strong><span>${check.ready ? "Configured" : check.id === "invite-email" ? "Manual invite links only; email is not connected" : check.required ? "Required before unattended use" : "Recommended before scaling"}</span></div>`).join("")}</div><p class="settings-copy">Configuration does not verify a real email receipt, phone GPS, camera upload, or locked-screen trip. Use the native iPhone/Android companion for background mileage; verify a measured drive before relying on it.</p><p class="settings-copy">This is one business workspace. Separate customer businesses need their own isolated workspace; do not add them as drivers in this one.</p><div class="item-actions"><a class="button secondary" href="/api/admin/backup" download>Download operational backup</a><a class="button ghost" href="mailto:hello@floraljet.llc?subject=Rivo%20production%20setup">Get setup help</a></div></div>
+            <div class="panel-body"><div class="accounts-checklist">${readiness.checks.map((check) => `<div><strong>${check.ready ? "✓" : "○"} ${h(check.label)}</strong><span>${check.ready ? "Configured" : check.id === "invite-email" ? "Manual invite links only; email is not connected" : check.required ? "Required before unattended use" : "Recommended before scaling"}</span></div>`).join("")}</div><p class="settings-copy">Configuration does not verify a real email receipt, phone GPS, camera upload, or locked-screen trip. Use the native iPhone/Android companion for background mileage; verify a measured drive before relying on it.</p><p class="settings-copy">This is one business workspace. Separate customer businesses need their own isolated workspace; do not add them as drivers in this one.</p><div class="item-actions"><a class="button secondary" href="/api/admin/backup" download>Download operational backup</a><a class="button ghost" href="mailto:rivocanada@gmail.com?subject=Rivo%20production%20setup">Get setup help</a></div></div>
           </div>
           <div class="panel">
             <div class="panel-header"><div><p class="eyebrow">Plan</p><h3 class="panel-title">${h(planAccess.name || company.plan || "Starter")}</h3><p class="panel-subtitle">${planAccess.monthlyPrice ? `$${h(planAccess.monthlyPrice)}/month · ` : ""}Dedicated Rivo workspace · ${h(status)}</p></div><span class="status-pill ${company.subscriptionStatus === "active" ? "green" : "amber"}">${h(status)}</span></div>
-            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">New workspaces begin with a guided 7-day evaluation. Billing is activated by a reviewed Rivo invoice. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:hello@floraljet.llc?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:hello@floraljet.llc?subject=Rivo%20billing">Billing support</a></div></div>
+            <div class="panel-body"><div class="plan-limit-grid"><div><strong>${h(planAccess.driverLimit || "—")}</strong><span>drivers</span></div><div><strong>${h(planAccess.deliveryLimit || "—")}</strong><span>deliveries / month</span></div></div><div class="plan-feature-list">${(planAccess.features || []).map((feature) => `<span>✓ ${h(feature.replaceAll("-", " "))}</span>`).join("")}</div><p class="settings-copy">New workspaces begin with a guided 7-day evaluation. Billing is activated by a reviewed Rivo invoice. Nothing on this page creates a charge.</p><div class="item-actions"><a class="button" href="mailto:rivocanada@gmail.com?subject=Rivo%20plan%20change">Request plan change</a><a class="button secondary" href="mailto:rivocanada@gmail.com?subject=Rivo%20billing">Billing support</a></div></div>
           </div>
           <div class="panel network-readiness-card"><div class="panel-header"><div><p class="eyebrow">Future network</p><h3 class="panel-title">My Drivers + Rivo Driver</h3><p class="panel-subtitle">The fulfillment model is ready for external network drivers without pretending a marketplace exists today.</p></div><span class="status assigned">Coming later</span></div><div class="panel-body"><div class="fulfillment-choice-preview"><div class="active"><strong>My Drivers</strong><span>Your employed or contracted fleet.</span></div><div><strong>Rivo Driver</strong><span>Quote, accept, track, and platform-fee workflow prepared for a future network.</span></div></div><p class="settings-copy">Until the Rivo network launches, use saved courier partners for third-party coverage.</p><button class="button secondary" data-action="dispatcher-view" data-view="drivers" type="button">Manage courier partners</button></div></div>
           <div class="panel">
             <div class="panel-header"><div><h3 class="panel-title">Support</h3><p class="panel-subtitle">Get help with onboarding, integrations, or live operations.</p></div></div>
-            <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "hello@floraljet.llc")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "hello@floraljet.llc")}?subject=Rivo%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button><button class="button secondary" data-action="request-account-deletion" type="button">Request account deletion</button></div></div>
+            <div class="panel-body"><div class="accounts-checklist"><div><strong>Email support</strong><span>${h(company.supportEmail || "rivocanada@gmail.com")}</span></div><div><strong>Workspace model</strong><span>Dedicated account with separated operational data.</span></div><div><strong>Security</strong><span>Drivers create their own passwords from expiring invitation links.</span></div></div><div class="item-actions"><a class="button secondary" href="mailto:${h(company.supportEmail || "rivocanada@gmail.com")}?subject=Rivo%20support">Contact support</a><button class="button secondary" data-action="logout" type="button">Log out</button><button class="button secondary" data-action="request-account-deletion" type="button">Request account deletion</button></div></div>
           </div>
         </div>
       </div>
@@ -4488,11 +4490,21 @@ async function syncWixOrders() {
   render();
 }
 
+const orderAutoSync = createOrderAutoSync({
+  getContext: () => ({
+    role: state.auth?.role, token: state.auth?.token,
+    visible: !document.hidden, online: navigator.onLine !== false,
+    connected: (state.snapshot?.integrations?.connections || []).some(item => item.provider !== "webhook"),
+    editing: hasUnsavedForm() || Boolean(document.activeElement?.matches('input, textarea, select, [contenteditable="true"]') || document.querySelector('dialog[open]'))
+  }),
+  request: ({automatic, connectionId}) => api(connectionId ? `/api/integrations/${encodeURIComponent(connectionId)}/sync` : "/api/integrations/sync", {
+    method: "POST", body: {automatic}
+  })
+});
+
 async function syncChannels(connectionId = "") {
-  const response = await api(connectionId ? `/api/integrations/${encodeURIComponent(connectionId)}/sync` : "/api/integrations/sync", {
-    method: "POST",
-    body: {}
-  });
+  const response = await orderAutoSync.run({manual: true, connectionId});
+  if (!response) { toast("An order sync is already running"); return; }
   if (response.snapshot) state.snapshot = response.snapshot;
   const results = response.results || (response.sync ? [response.sync] : []);
   const imported = results.reduce((total, item) => total + Number(item.imported || 0), 0);
@@ -6022,6 +6034,9 @@ function connectSnapshotStream() {
   const refresh = async () => {
     if (generation !== state.refreshGeneration || !state.auth?.role) return;
     try {
+      // Source imports must not delay route/GPS updates. The next snapshot poll
+      // picks up new arrivals through the existing notification path.
+      void orderAutoSync.run().catch(() => {});
       const response = await api("/api/me");
       if (generation !== state.refreshGeneration) return;
       state.auth = response.session;
