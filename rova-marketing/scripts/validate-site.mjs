@@ -74,11 +74,36 @@ await expectStatus("/assets/rova-secondary.css", 200, /--blue: #[0-9a-f]{6}/);
 await expectStatus("/favicon.ico", 200);
 await expectStatus("/missing-page", 404);
 
+// Header destinations must be real, useful routes rather than homepage anchors.
+const destinations = [["/product", "Product"], ["/mileage", "Mileage"], ["/industries", "Industries"], ["/pricing", "Pricing"], ["/contact", "Book a Demo"]];
+for (const path of ["/", ...destinations.map(([path]) => path)]) {
+  const response = await worker.default.fetch(new Request(`https://floraljet.test${path}`), env);
+  assert.equal(response.status, 200, path);
+  const page = await response.text();
+  const nav = page.match(/<nav aria-label="Main navigation">([\s\S]*?)<\/nav>/)?.[1];
+  assert.ok(nav, `${path}: main navigation exists`);
+  for (const [href, label] of destinations) assert.ok(nav.includes(`href="${href}"`), `${path}: ${label} destination`);
+  assert.doesNotMatch(nav, /href="[^"]*#/);
+  assert.equal((page.match(/<h1(?:\s|>)/g) || []).length, 1, `${path}: one page heading`);
+}
+for (const path of ["/product", "/mileage"]) {
+  const page = await (await worker.default.fetch(new Request(`https://floraljet.test${path}`), env)).text();
+  assert.ok(page.includes(`rel="canonical" href="https://floraljet.llc${path}"`));
+  assert.ok(page.includes(`href="${path}" aria-current="page"`));
+  for (const [, asset] of page.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) await expectStatus(asset, 200);
+  const schema = JSON.parse(page.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(schema["@graph"].at(-1).url, `https://floraljet.llc${path}`);
+}
+const sitemap = await readFile(resolve(clientRoot, "sitemap.xml"), "utf8");
+for (const path of ["/product", "/mileage"]) assert.ok(sitemap.includes(`https://floraljet.llc${path}</loc>`));
+
+
 const homepage = await (await worker.default.fetch(new Request("https://floraljet.test/"), env)).text();
 assert.match(homepage, /href="https:\/\/app\.floraljet\.llc\/operations">Log in<\/a>/);
 assert.match(homepage, /href="https:\/\/app\.floraljet\.llc\/signup"/);
 assert.doesNotMatch(homepage.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ").replace(/<[^>]*>/g," "), /FleetJet|FloralJet|Rova|on autopilot/i);
 assert.match(homepage, /rivo-dispatch-current\.png/);
+assert.match(homepage, /href="#product-tour"[^>]*>See it in motion/);
 const contact = await (await worker.default.fetch(new Request("https://floraljet.test/contact"), env)).text();
 assert.equal((contact.match(/ required=""/g)||[]).length,3);
 const alias = await worker.default.fetch(new Request("https://floral-jet.spennyman.chatgpt.site/pricing"),env);
