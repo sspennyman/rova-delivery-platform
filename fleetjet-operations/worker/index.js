@@ -1,6 +1,7 @@
 import {handleMarketplace,restoreMarketplaceCredentials,marketplaceEnvironment} from './marketplace.js';
 import {marketplaceStore} from './marketplace-store.js';
-import {withinOrderWindow} from '../public/order-window.js';
+import {handleChatgpt} from './chatgpt.js';
+import {withinOrderWindow,outsideDailyOrderWindow} from '../public/order-window.js';
 import {searchShopifyOrders} from './shopify.js';
 import {searchWixOrders} from "./wix-search.js";
 import { handleMileage, mileageSnapshot, finishTrip, personalMileageDriverId } from "./mileage.js";
@@ -9,7 +10,7 @@ import { wixFulfillment, isNonDeliveryOrder, fulfillmentMethodForTrip } from "..
 import {pushConfigured, validatedPushSubscription, assignmentBaseline, queueAssignmentNotifications, publicAssignmentNotifications, deliverAssignmentPush} from "./assignment-notifications.js";
 import { sendDriverInvite } from "./driver-invitations.js";
 import { workspaceKey, scopedToken, scopeEnvironment, ensureWorkspaceDirectory } from "./workspaces.js";
-import {handlePublicApi, publicApiKey} from './public-api.js';
+import {handlePublicApi, publicApiKey, apiOrder} from './public-api.js';
 const clients = new Set();
 const DEFAULT_COMPANY_NAME = "Rivo";
 const DEFAULT_PICKUP_ADDRESS = "";
@@ -2192,6 +2193,7 @@ function withSecurityHeaders(response, url) {
     headers.delete("X-Frame-Options");
     headers.set("Referrer-Policy", "no-referrer");
   }
+  if (url.pathname === "/chatgpt/connect" || url.pathname === "/chatgpt-connect") headers.set("Referrer-Policy", "no-referrer");
 
   if (url.pathname.startsWith("/api/") || url.pathname === "/events") headers.set("Cache-Control", "no-store");
   if (url.protocol === "https:") headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
@@ -2843,6 +2845,23 @@ const marketplaceApi = {
       connection.lastSyncAt=nowIso();connection.lastError='';
     } else await syncConnection(db,scoped,connection);
     await writeDb(db,scoped);
+  }
+};
+
+const chatgptApi = {
+  body: readBody,
+  authenticate: marketplaceApi.authenticate,
+  async workspaceName(key,env) {return (await readDb(marketplaceEnvironment(env,key))).company.name;},
+  async read(key,name,args,env) {
+    const db=await readDb(marketplaceEnvironment(env,key));
+    const deliveries=db.trips.filter(t=>t.tripType==='business'&&(!outsideDailyOrderWindow(t)||['assigned','active','en-route','in-progress'].includes(t.status)));
+    if(name==='rivo_list_deliveries') {
+      const items=deliveries.filter(t=>!args.status||t.status===args.status);
+      return {orders:items.slice(0,args.limit||20).map(apiOrder),total:items.length,window:'Recent store orders and existing active routes; private personal mileage excluded.'};
+    }
+    if(name==='rivo_list_drivers')return {drivers:db.drivers.filter(d=>!d.archivedAt).map(d=>({id:d.id,name:d.name,status:d.status,vehicle:d.vehicle}))};
+    const completed=db.trips.filter(t=>t.tripType==='business'&&Date.parse(t.endedAt)>Date.now()-86400000&&Date.parse(t.endedAt)<=Date.now());
+    return {workspace:db.company.name,asOf:nowIso(),counts:deliveries.reduce((counts,t)=>({...counts,[t.status]:(counts[t.status]||0)+1}),{}),drivers:db.drivers.filter(d=>!d.archivedAt).length,completedDeliveriesPast24Hours:completed.length,deliveryKilometresPast24Hours:Number(completed.reduce((sum,t)=>sum+(Number(t.distanceKm)||0),0).toFixed(2)),distanceNote:'Distance recorded on completed business delivery trips. This excludes private personal mileage and does not determine tax eligibility.'};
   }
 };
 
@@ -4886,6 +4905,7 @@ function extension(pathname) {
 }
 
 function staticPath(pathname) {
+  if (pathname === "/chatgpt/connect") return "/chatgpt-connect.html";
   if (pathname === "/marketplace/wix" || pathname === "/marketplace/shopify") return "/marketplace.html";
   if (pathname === "/signup") return "/index.html";
   if (pathname === "/") {
@@ -4911,16 +4931,17 @@ async function serveStatic(request, env, url) {
   let response = await env.ASSETS.fetch(new Request(assetUrl, request));
   // The asset host canonicalizes .html files. Resolve this internally so the
   // provider path and Wix's narrowly scoped frame policy remain intact.
-  if (pathname === "/marketplace.html" && [301, 302, 307, 308].includes(response.status)) {
+  const assetCanonical = {"/marketplace.html":"/marketplace", "/chatgpt-connect.html":"/chatgpt-connect"}[pathname];
+  if (assetCanonical && [301, 302, 307, 308].includes(response.status)) {
     const canonical = new URL(response.headers.get("Location") || "", assetUrl);
-    if (canonical.origin === assetUrl.origin && canonical.pathname === "/marketplace") {
+    if (canonical.origin === assetUrl.origin && canonical.pathname === assetCanonical) {
       response = await env.ASSETS.fetch(new Request(canonical, request));
     }
   }
   if (response.status === 404) return new Response("Not found", { status: 404 });
   const headers = new Headers(response.headers);
   headers.set("Content-Type", MIME_TYPES[extension(pathname)] || headers.get("Content-Type") || "application/octet-stream");
-  headers.set("Cache-Control", ["/index.html", "/operations.html", "/marketplace.html"].includes(pathname) ? "no-store" : "public, max-age=300");
+  headers.set("Cache-Control", ["/index.html", "/operations.html", "/marketplace.html", "/chatgpt-connect.html"].includes(pathname) ? "no-store" : "public, max-age=300");
   headers.set("x-content-type-options", "nosniff");
   return new Response(response.body, {
     status: response.status,
@@ -4949,7 +4970,10 @@ export default {
     }
     try {
       let response;
-      if (url.pathname.startsWith("/api/marketplace/")) {
+      if (url.pathname === "/mcp" || url.pathname.startsWith("/api/chatgpt/")) {
+        if (unsafeBrowserWrite(request, url)) return withSecurityHeaders(sendJson({error:"Use the signed-in Rivo app for this action."},403),url);
+        response = await handleChatgpt(request,env,chatgptApi);
+      } else if (url.pathname.startsWith("/api/marketplace/")) {
         if (unsafeBrowserWrite(request, url)) return withSecurityHeaders(sendJson({error:"Use the signed-in Rivo app for this action."},403),url);
         response = await handleMarketplace(request,env,ctx,{...marketplaceApi,environment:env});
       } else if (url.pathname.startsWith("/api/")) {
