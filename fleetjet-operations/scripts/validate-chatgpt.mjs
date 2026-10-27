@@ -6,6 +6,7 @@ async function request(path,body,token,headers={}){const r=await worker.fetch(ne
 async function tool(name,args={},actor='fixture-chat-a'){return request('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},null,actor?{'oai-authenticated-user-id':actor,'oai-authenticated-user-email':'chat@example.test'}:{});}
 const register=email=>request('/api/auth/register',{name:'Fixture owner',companyName:email.startsWith('a')?'Alpha Fixture':'Beta Fixture',email,password:'fixture-password-123'});
 try {
+ const discover=await worker.fetch(new Request('https://delivery-driver-tracker.spennyman.chatgpt.site/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'server/discover'})}),env);assert.equal(discover.status,200,'canonical MCP resource must not redirect to the marketing host');
  const a=await register('alpha@example.test'),b=await register('beta@example.test');assert.equal(a.status,201);assert.equal(b.status,201);
  const token=a.data.session.token;
  assert.equal((await tool('rivo_connection_status',{},null)).status,401);

@@ -4957,7 +4957,9 @@ export default {
       .split(",")[0]
       .trim()
       .split(":")[0];
-    if (APP_HOSTING_ALIASES.has(url.hostname) || APP_HOSTING_ALIASES.has(forwardedHost)) {
+    // MCP's OAuth resource is the canonical Sites URL. Redirecting it to the
+    // branded website breaks authenticated discovery and tool calls.
+    if (url.pathname !== "/mcp" && (APP_HOSTING_ALIASES.has(url.hostname) || APP_HOSTING_ALIASES.has(forwardedHost))) {
       url.protocol = "https:";
       url.hostname = APP_CANONICAL_HOST;
       return withSecurityHeaders(new Response(null, {
