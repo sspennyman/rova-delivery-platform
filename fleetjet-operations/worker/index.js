@@ -4908,11 +4908,19 @@ async function serveStatic(request, env, url) {
   }
   const assetUrl = new URL(request.url);
   assetUrl.pathname = pathname;
-  const response = await env.ASSETS.fetch(new Request(assetUrl, request));
+  let response = await env.ASSETS.fetch(new Request(assetUrl, request));
+  // The asset host canonicalizes .html files. Resolve this internally so the
+  // provider path and Wix's narrowly scoped frame policy remain intact.
+  if (pathname === "/marketplace.html" && [301, 302, 307, 308].includes(response.status)) {
+    const canonical = new URL(response.headers.get("Location") || "", assetUrl);
+    if (canonical.origin === assetUrl.origin && canonical.pathname === "/marketplace") {
+      response = await env.ASSETS.fetch(new Request(canonical, request));
+    }
+  }
   if (response.status === 404) return new Response("Not found", { status: 404 });
   const headers = new Headers(response.headers);
   headers.set("Content-Type", MIME_TYPES[extension(pathname)] || headers.get("Content-Type") || "application/octet-stream");
-  headers.set("Cache-Control", pathname === "/index.html" || pathname === "/operations.html" ? "no-store" : "public, max-age=300");
+  headers.set("Cache-Control", ["/index.html", "/operations.html", "/marketplace.html"].includes(pathname) ? "no-store" : "public, max-age=300");
   headers.set("x-content-type-options", "nosniff");
   return new Response(response.body, {
     status: response.status,
