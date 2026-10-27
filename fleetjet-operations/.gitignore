@@ -17,6 +17,7 @@ android/local.properties
 *.jks
 work/mileage-test/
 node_modules/
+.shopify/
 dist/
 work/data/
 *.log

@@ -1,5 +1,5 @@
 import { createOrderAutoSync } from './order-auto-sync.js?v=105';
-import {outsideDailyOrderWindow} from './order-window.js?v=103';
+import {outsideDailyOrderWindow} from './order-window.js?v=107';
 import { createMileageUI } from "./mileage.js?v=103";
 import { createAssignmentAlerts } from "./assignment-alerts.js?v=103";
 import { isNonDeliveryOrder, fulfillmentMethodForTrip } from "./order-fulfillment.js?v=103";
@@ -1463,7 +1463,7 @@ function channelOrdersPanel(trips) {
       <div class="panel-header">
         <div>
           <h2 class="panel-title">${history ? "Delivery history" : "Orders to dispatch"}</h2>
-          <p class="panel-subtitle">${history ? "Past orders and completed deliveries. Original statuses and proof are preserved." : `${channelOrders.length} waiting for a route · Wix orders from the past 24 hours`}</p>
+          <p class="panel-subtitle">${history ? "Past orders and completed deliveries. Original statuses and proof are preserved." : `${channelOrders.length} waiting for a route · Store orders from the past 24 hours`}</p>
           ${!history && connections.some(item => item.provider !== "webhook") ? '<p class="panel-subtitle">Auto-checks every minute while open and online · pauses while editing</p>' : ""}
         </div>
         <div class="item-actions">
@@ -2675,7 +2675,7 @@ function pickupOrdersHtml() {
   const orders = getTrips().filter(trip => isNonDeliveryOrder(trip) && !outsideDailyOrderWindow(trip))
     .sort((a, b) => new Date(b.source?.createdDate || b.importedAt || 0) - new Date(a.source?.createdDate || a.importedAt || 0));
   return `<div class="panel orders-panel"><div class="panel-header"><div><h2 class="panel-title">Pickups & other orders</h2>
-    <p class="panel-subtitle">Wix orders from the past 24 hours. Pickups, carrier shipments, and fulfilled orders stay out of driver routes until you confirm.</p></div>
+    <p class="panel-subtitle">Store orders from the past 24 hours. Pickups, carrier shipments, and fulfilled orders stay out of driver routes until you confirm.</p></div>
     <button class="button secondary" data-action="sync-channels" type="button">Sync orders</button></div><div class="panel-body">
     ${orders.length ? `<div class="list">${orders.map(trip => {
       const method = fulfillmentMethodForTrip(trip);

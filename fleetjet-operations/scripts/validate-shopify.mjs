@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {searchShopifyOrders,shopifyOrigin} from '../worker/shopify.js';
+const now=Date.now(),recent=new Date(now-3600000).toISOString();
+const order={id:'gid://shopify/Order/123',legacyResourceId:'123',name:'#1001',createdAt:recent,updatedAt:recent,displayFinancialStatus:'PENDING',displayFulfillmentStatus:'UNFULFILLED',shippingAddress:{firstName:'Fixture',lastName:'Customer',address1:'123 Example Street',city:'Ottawa'},lineItems:{nodes:[{quantity:1,name:'Fixture product'}]}};
+let calls=0;
+const fetcher=async(url,init)=>{calls++;assert.ok(url.endsWith('/2026-10/graphql.json'));const body=JSON.parse(init.body);assert.match(body.variables.query,/created_at:>=/);assert.ok(!body.variables.query.includes('paid'),'pending orders are not silently dropped');return Response.json({data:{orders:{nodes:[order,{...order,id:'gid://shopify/Order/999',legacyResourceId:'999',createdAt:'2023-01-01T00:00:00Z'}],pageInfo:{hasNextPage:calls===1,endCursor:'next'}}}});};
+const result=await searchShopifyOrders({storeUrl:'https://fixture.myshopify.com'},{accessToken:'fixture'},fetcher,now);
+assert.equal(calls,2);assert.equal(result.length,1);assert.equal(result[0].id,'123');assert.equal(result[0].paymentStatus,'PENDING');
+await assert.rejects(searchShopifyOrders({storeUrl:'https://fixture.myshopify.com'},{accessToken:'fixture'},async()=>Response.json({errors:[{message:'Denied'}]})));
+for(const origin of ['https://fixture.myshopify.com.evil.test','http://fixture.myshopify.com','https://user:pass@fixture.myshopify.com','https://fixture.myshopify.com/escape','https://127.0.0.1'])assert.throws(()=>shopifyOrigin(origin));
+await assert.rejects(searchShopifyOrders({storeUrl:'https://fixture.myshopify.com'},{accessToken:'fixture'},async()=>Response.json({data:{orders:{nodes:[],pageInfo:{hasNextPage:true,endCursor:'stuck'}}}})));
+console.log('Shopify GraphQL passed: full pagination, pending payments retained, strict 24h exclusion, duplicate IDs, API error handling, stuck cursor and destination validation.');

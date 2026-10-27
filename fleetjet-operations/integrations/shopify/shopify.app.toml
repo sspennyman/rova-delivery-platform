@@ -1,0 +1,21 @@
+name = "Rivo Delivery & Mileage"
+client_id = "c6afac8890ca25a87d3379631d8cf3ea"
+application_url = "https://app.floraljet.llc/marketplace/shopify"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders"
+
+[auth]
+redirect_urls = ["https://app.floraljet.llc/api/marketplace/shopify/callback"]
+
+[webhooks]
+api_version = "2026-10"
+
+[[webhooks.subscriptions]]
+topics = ["orders/create", "orders/updated", "orders/cancelled", "app/uninstalled"]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "https://app.floraljet.llc/api/marketplace/shopify/webhooks"
+
+[build]
+automatically_update_urls_on_dev = false

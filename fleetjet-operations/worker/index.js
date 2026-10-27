@@ -1,3 +1,7 @@
+import {handleMarketplace,restoreMarketplaceCredentials,marketplaceEnvironment} from './marketplace.js';
+import {marketplaceStore} from './marketplace-store.js';
+import {withinOrderWindow} from '../public/order-window.js';
+import {searchShopifyOrders} from './shopify.js';
 import {searchWixOrders} from "./wix-search.js";
 import { handleMileage, mileageSnapshot, finishTrip, personalMileageDriverId } from "./mileage.js";
 import { prepareAutomaticStops, detectAutomaticCompletion } from "./auto-delivery.js";
@@ -2183,6 +2187,12 @@ function withSecurityHeaders(response, url) {
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
+  if (url.pathname === "/marketplace/wix") {
+    headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("frame-ancestors 'none'", "frame-ancestors https://manage.wix.com"));
+    headers.delete("X-Frame-Options");
+    headers.set("Referrer-Policy", "no-referrer");
+  }
+
   if (url.pathname.startsWith("/api/") || url.pathname === "/events") headers.set("Cache-Control", "no-store");
   if (url.protocol === "https:") headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   if (!url.pathname.startsWith("/api/") && url.pathname !== "/events") headers.set("X-Robots-Tag", "noindex, nofollow");
@@ -2713,7 +2723,7 @@ function channelOrderToTrip(order, connection, env) {
 }
 
 function upsertChannelOrders(db, connection, orders, env) {
-  const existing = new Map(db.trips.filter((trip) => trip.source?.connectionId === connection.id && trip.source?.orderId).map((trip) => [String(trip.source.orderId), trip]));
+  const existing = new Map(db.trips.filter((trip) => (trip.source?.connectionId === connection.id || connection.provider === "wix" && connection.siteId && connection.siteId === env.WIX_SITE_ID && trip.source?.system === "wix" && !trip.source?.connectionId) && trip.source?.orderId).map((trip) => [String(trip.source.orderId), trip]));
   let imported = 0;
   let updated = 0;
   let skipped = 0;
@@ -2725,10 +2735,14 @@ function upsertChannelOrders(db, connection, orders, env) {
       const sourceChanged = JSON.stringify(nextSource) !== JSON.stringify(prior.source);
       prior.source = nextSource;
       const fulfillmentChanged = connection.provider === "wix" && reconcileWixFulfillment(prior, { pickup: connection.pickupLabel, destination: order.destination });
+      if (["shopify","wix","woocommerce","webhook"].includes(connection.provider) && /^(cancelled|canceled|refunded|failed)$/i.test(order.orderStatus) && prior.status === "queued") {
+        prior.status="failed"; prior.endedAt=nowIso(); prior.approvalNotes=`Cancelled in ${providerLabel(connection.provider)} before dispatch.`;
+      }
       if (sourceChanged || fulfillmentChanged) { updated += 1; }
       else skipped += 1;
       continue;
     }
+    if (["shopify","wix","woocommerce","webhook"].includes(connection.provider) && (!withinOrderWindow(order.createdAt) || /^(cancelled|canceled|refunded|failed)$/i.test(order.orderStatus))) { skipped += 1; continue; }
     const trip = channelOrderToTrip(order, connection, env);
     db.trips.push(trip);
     existing.set(String(order.id), trip);
@@ -2737,15 +2751,10 @@ function upsertChannelOrders(db, connection, orders, env) {
   return { imported, updated, skipped, ordersFetched: orders.length, lastSyncAt: nowIso() };
 }
 
+function normalizeWixChannelOrder(order) { return { id: String(order.id || ""), number: order.number || order.id || "", customerName: wixOrderCustomerName(order), destination: formatWixAddress(wixOrderAddress(order)), phone: wixOrderContact(order).phone || wixOrderContact(order).phoneNumber || "", items: normalizedLineItems(order.lineItems), createdAt: order.createdDate || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.status || "", ...wixOrderSource(order) }; }
+
 async function fetchConnectionOrders(connection, credentials) {
-  if (connection.provider === "shopify") {
-    const since = new Date(Date.now() - 14 * 86400000).toISOString();
-    const params = new URLSearchParams({ status: "any", financial_status: "paid", limit: "100", created_at_min: since });
-    const response = await fetch(`${connection.storeUrl}/admin/api/2026-07/orders.json?${params}`, { headers: { "X-Shopify-Access-Token": credentials.accessToken } });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`Shopify ${response.status}: ${payload.errors || response.statusText}`);
-    return (payload.orders || []).filter((order) => !order.cancelled_at).map(normalizeShopifyOrder);
-  }
+  if (connection.provider === "shopify") return searchShopifyOrders(connection, credentials);
   if (connection.provider === "woocommerce") {
     const params = new URLSearchParams({ status: "any", per_page: "100", after: new Date(Date.now() - 14 * 86400000).toISOString() });
     const authorization = `Basic ${btoa(`${credentials.consumerKey}:${credentials.consumerSecret}`)}`;
@@ -2756,19 +2765,86 @@ async function fetchConnectionOrders(connection, credentials) {
   }
   if (connection.provider === "wix") {
     const config = { configured: true, siteId: credentials.siteId, authorization: credentials.apiKey.startsWith("Bearer ") ? credentials.apiKey : credentials.apiKey, orderStatuses: ["APPROVED"], paymentStatuses: ["PAID"], fulfillmentStatuses: ["NOT_FULFILLED", "PARTIALLY_FULFILLED", "FULFILLED"], lookbackDays: 1, limit: 100, pickupLabel: connection.pickupLabel };
-    return (await wixSearchOrders(config)).map((order) => ({ id: String(order.id || ""), number: order.number || order.id || "", customerName: wixOrderCustomerName(order), destination: formatWixAddress(wixOrderAddress(order)), phone: wixOrderContact(order).phone || wixOrderContact(order).phoneNumber || "", items: normalizedLineItems(order.lineItems), createdAt: order.createdDate || "", paymentStatus: order.paymentStatus || "", fulfillmentStatus: order.fulfillmentStatus || "", orderStatus: order.status || "", ...wixOrderSource(order) }));
+    return (await wixSearchOrders(config)).map(normalizeWixChannelOrder);
   }
   throw new Error("Webhook connections receive orders automatically and do not need manual sync.");
 }
 
 async function syncConnection(db, env, connection) {
-  const credentials = await decryptIntegrationCredentials(env, connection.credentials);
+  const stored = await decryptIntegrationCredentials(env, connection.credentials);
+  const credentials = await restoreMarketplaceCredentials(connection, stored, env);
+  if (credentials !== stored && connection.authMode) connection.credentials = await encryptIntegrationCredentials(env, credentials);
   const orders = await fetchConnectionOrders(connection, credentials);
   const sync = upsertChannelOrders(db, connection, orders, env);
   connection.lastSyncAt = sync.lastSyncAt;
   connection.lastError = "";
   return sync;
 }
+
+const marketplaceApi = {
+  body: readBody,
+  encrypt: encryptIntegrationCredentials,
+  decrypt: decryptIntegrationCredentials,
+  async privacyExport(key,event,details,env) {
+    const scoped=marketplaceEnvironment(env,key),db=await readDb(scoped);
+    const installation=await (await marketplaceStore(env)).installation('shopify',event.external_id);
+    const ids=new Set([...(details.orders_requested||[]),...(details.orders_to_redact||[])].map(String));
+    return operationalBackup(db).trips.filter(t=>t.source?.system==='shopify'&&t.source.connectionId===installation?.connection_id&&(event.event_type==='shop/redact'||ids.has(String(t.source.orderId))));
+  },
+  async authenticate(request,env,url) {
+    const scoped = await scopeEnvironment(request,env,url);
+    const db = await readDb(scoped);
+    const session = sessionFromRequest(request,db,url);
+    return isDispatcher(session) ? {key:workspaceKey(scoped.RIVO_STATE_KEY),providers:db.integrations.connections.filter(c=>c.authMode).map(c=>c.provider)} : null;
+  },
+  async link(key,provider,externalId,credentials,directory) {
+    const env = marketplaceEnvironment(this.environment, key);
+    const db = await readDb(env);
+    const existing = await directory.installation(provider,externalId);
+    if (existing && existing.workspace_key !== key) throw Object.assign(new Error("This store belongs to another workspace."),{status:400});
+    if (provider === "wix" && key === "primary" && env.WIX_SITE_ID && credentials.siteId !== env.WIX_SITE_ID) throw Object.assign(new Error("Use a separate workspace for a different Wix site."),{status:400});
+    let connection = db.integrations.connections.find(c=>c.id===existing?.connection_id || (c.provider===provider && (c.externalId===externalId || provider==='shopify' && c.storeUrl===`https://${externalId}`)));
+    const id=connection?.id || makeId('chn');
+    await directory.link(provider,externalId,key,id);
+    if(!connection){connection={id,provider,name:provider==='wix'?'Wix store':'Shopify store',createdAt:nowIso(),lastSyncAt:null,lastError:'',pickupLabel:workspacePickupAddress(db)};db.integrations.connections.push(connection);}
+    connection.externalId=externalId;
+    connection.authMode=provider==='wix'?'wix-app':'shopify-oauth';
+    connection.siteId=credentials.siteId || '';
+    connection.storeUrl=provider==='shopify'?`https://${externalId}`:'';
+    connection.credentials=await encryptIntegrationCredentials(env,credentials);
+    await writeDb(db,env);
+  },
+  async disconnect(installation,env) {
+    const scoped=marketplaceEnvironment(env,installation.workspace_key),db=await readDb(scoped);
+    db.integrations.connections=db.integrations.connections.filter(c=>c.id!==installation.connection_id);
+    await writeDb(db,scoped);
+  },
+  async synchronize(installation,event,env,getShopifyOrder) {
+    const scoped=marketplaceEnvironment(env,installation.workspace_key),db=await readDb(scoped);
+    const connection=db.integrations.connections.find(c=>c.id===installation.connection_id);
+    if(!connection)return;
+    const data=JSON.parse(event.payload_json);
+    if(connection.provider==='shopify' && data.orderId) {
+      const stored=await decryptIntegrationCredentials(scoped,connection.credentials);
+      const credentials=await restoreMarketplaceCredentials(connection,stored,scoped);
+      if(credentials!==stored)connection.credentials=await encryptIntegrationCredentials(scoped,credentials);
+      const order=await getShopifyOrder(connection,credentials,data.orderId);
+      if(order)upsertChannelOrders(db,connection,[order],scoped);
+      connection.lastSyncAt=nowIso();connection.lastError='';
+    } else if(connection.provider==='wix' && data.orderId) {
+      if(!/^[a-f0-9-]{36}$/i.test(data.orderId))throw Error('Invalid Wix order ID.');
+      const stored=await decryptIntegrationCredentials(scoped,connection.credentials);
+      const credentials=await restoreMarketplaceCredentials(connection,stored,scoped);
+      if(credentials!==stored)connection.credentials=await encryptIntegrationCredentials(scoped,credentials);
+      const response=await fetch(`https://www.wixapis.com/ecom/v1/orders/${encodeURIComponent(data.orderId)}`,{headers:{Authorization:credentials.apiKey},signal:AbortSignal.timeout(10000)});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok || !payload.order)throw Error('Wix order update could not be read.');
+      upsertChannelOrders(db,connection,[normalizeWixChannelOrder(payload.order)],scoped);
+      connection.lastSyncAt=nowIso();connection.lastError='';
+    } else await syncConnection(db,scoped,connection);
+    await writeDb(db,scoped);
+  }
+};
 
 async function handleApi(request, env, url) {
   if (request.method === "POST" && url.pathname === "/api/auth/register") {
@@ -4810,6 +4886,7 @@ function extension(pathname) {
 }
 
 function staticPath(pathname) {
+  if (pathname === "/marketplace/wix" || pathname === "/marketplace/shopify") return "/marketplace.html";
   if (pathname === "/signup") return "/index.html";
   if (pathname === "/") {
     return "/index.html";
@@ -4845,7 +4922,7 @@ async function serveStatic(request, env, url) {
 }
 
 export default {
-  async fetch(request, env = {}) {
+  async fetch(request, env = {}, ctx = {}) {
     const url = new URL(request.url);
     const forwardedHost = String(request.headers.get("x-forwarded-host") || request.headers.get("host") || "")
       .split(",")[0]
@@ -4864,7 +4941,10 @@ export default {
     }
     try {
       let response;
-      if (url.pathname.startsWith("/api/")) {
+      if (url.pathname.startsWith("/api/marketplace/")) {
+        if (unsafeBrowserWrite(request, url)) return withSecurityHeaders(sendJson({error:"Use the signed-in Rivo app for this action."},403),url);
+        response = await handleMarketplace(request,env,ctx,{...marketplaceApi,environment:env});
+      } else if (url.pathname.startsWith("/api/")) {
         if (unsafeBrowserWrite(request, url)) return withSecurityHeaders(sendJson({ error: "Use the signed-in Rivo app for this action." }, 403), url);
         env = await scopeEnvironment(request, env, url);
         response = await handleApi(request, env, url);
